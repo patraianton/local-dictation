@@ -1,0 +1,32 @@
+# --- Personal data: never publish ---
+# Voice recordings and transcripts of everything the user has ever dictated.
+recordings/
+logs/
+state/
+
+# Personal vocabularies. Ship the .example files instead; these hold real
+# names of people, customers and internal projects.
+glossary.txt
+fixes.tsv
+mywords.txt
+
+# Benchmark outputs contain full transcripts of real dictations.
+bench/*-result.json
+bench/*-result.md
+
+# Internal handover notes (Russian, quotes real people).
+HANDOVER.md
+
+# --- Environment ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.idea/
+.vscode/
+*.log
+
+# Real transcripts and audio samples of the owner. Never publish.
+bench/transcripts.txt
+bench/*.wav

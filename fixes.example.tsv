@@ -1,0 +1,10 @@
+# heard	correct	times used	source
+# Copy to fixes.tsv. One replacement per line, columns separated by TAB.
+# The file grows on its own: when the corrector fixes the same word twice,
+# it is remembered here forever and fixed instantly from then on.
+# Whole words only, case-insensitive. The capital letter of the heard word is
+# kept for ordinary words, but not for names with their own spelling (herdr).
+клод код	Claude Code	0	seed
+гитхаб	GitHub	0	seed
+луп	loop	0	seed
+воркtree	worktree	0	seed
