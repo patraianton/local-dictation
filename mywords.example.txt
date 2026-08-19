@@ -1,0 +1,9 @@
+# Ordinary words of your own language that the corrector must NOT turn into
+# English terms: "сессию" must stay "сессию" and never become "session".
+# Rebuild from your own transcripts with: run.ps1 learnwords
+# Copy to mywords.txt.
+сессия
+сессию
+проде
+доки
+надо

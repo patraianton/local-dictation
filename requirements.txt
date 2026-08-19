@@ -1,0 +1,13 @@
+# Local dictation. Install into a venv:
+#   .venv\Scripts\pip install -r requirements.txt
+faster-whisper>=1.0
+sounddevice>=0.5
+soxr>=1.0
+numpy>=2.0
+httpx>=0.27
+keyboard>=0.13
+pyperclip>=1.9
+# Russian morphology: tells an order ("переводи") from a noun ("статьи").
+pymorphy3>=2.0
+# Per-application volume on Windows: ducks other audio while you speak.
+pycaw>=20240210

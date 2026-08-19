@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dictation feed</title>
+<style>
+  :root{
+    /* Graphite of the mic body, amber of the record light. */
+    --bg:#131619; --panel:#181c20; --raise:#1e2429;
+    --line:#252c32; --line-soft:#1f252a;
+    --text:#e4e7ea; --dim:#8a939c; --faint:#5c656d;
+    --amber:#f0a13c; --amber-dim:#7a5423;
+    --bad:#d8544f; --ok:#63c08a;
+    --mono:"Cascadia Mono",Consolas,"Courier New",monospace;
+    --sans:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--sans);
+    font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--amber)}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  :focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
+
+  /* --- status bar --- */
+  header{
+    position:sticky; top:0; z-index:20; background:var(--bg);
+    border-bottom:1px solid var(--line);
+  }
+  .bar{
+    max-width:1080px;margin:0 auto;padding:14px 20px;
+    display:flex;align-items:baseline;gap:24px;flex-wrap:wrap;
+  }
+  .brand{
+    font-family:var(--mono); font-size:12px; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--amber);
+  }
+  .tabs{display:flex;gap:2px;margin-left:auto}
+  .tab{
+    font-family:var(--mono);font-size:12px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--faint);padding:6px 12px;border-radius:3px;
+  }
+  .tab:hover{color:var(--text)}
+  .tab[aria-selected="true"]{color:var(--bg);background:var(--amber)}
+  .stats{display:flex;gap:20px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .stats b{color:var(--text);font-weight:600}
+
+  .offline{
+    margin-top:24px;padding:14px 18px;background:#241c1c;
+    border-left:3px solid var(--bad);border-radius:0 4px 4px 0;
+    font-size:13px;color:var(--dim);
+  }
+  .offline b{color:var(--bad);display:block;margin-bottom:2px;font-size:14px}
+  .offline span{display:block;margin-top:6px;font-family:var(--mono);
+                font-size:11px;color:var(--faint)}
+
+  /* --- последняя диктовка --- */
+  .last{
+    margin:28px 0 0; padding:20px 24px; background:var(--panel);
+    border-left:3px solid var(--amber-dim); border-radius:0 4px 4px 0;
+    transition:border-color .6s ease;
+  }
+  .last.fresh{border-left-color:var(--amber)}
+  @media (prefers-reduced-motion:no-preference){
+    .last.fresh{animation:blip 1.2s ease-out}
+  }
+  @keyframes blip{0%{background:#22262a}100%{background:var(--panel)}}
+  .last-head{
+    display:flex;gap:14px;align-items:center;
+    font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:12px;
+  }
+  .last-text{font-size:20px;line-height:1.45;min-height:1.45em;white-space:pre-wrap}
+  .last-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+
+  .btn{
+    font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+    padding:7px 14px;border:1px solid var(--line);border-radius:3px;color:var(--dim);
+  }
+  .btn:hover{border-color:var(--faint);color:var(--text)}
+  .btn.primary{background:var(--amber);border-color:var(--amber);color:#181207;font-weight:600}
+  .btn.primary:hover{background:#ffb154}
+  .btn.on{border-color:var(--bad);color:var(--bad)}
+  .btn.done{border-color:var(--ok);color:var(--ok)}
+
+  /* --- поиск --- */
+  .filters{display:flex;gap:12px;align-items:center;margin:32px 0 8px;flex-wrap:wrap}
+  .search{
+    flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line);
+    border-radius:3px;padding:9px 12px;color:var(--text);font:inherit;
+  }
+  .search::placeholder{color:var(--faint)}
+  .toggle{
+    display:flex;align-items:center;gap:8px;font-family:var(--mono);
+    font-size:12px;color:var(--dim);cursor:pointer;user-select:none;
+  }
+  .toggle input{accent-color:var(--bad);width:15px;height:15px}
+
+  /* --- лента --- */
+  .tape{border-top:1px solid var(--line)}
+  .take{
+    display:grid; grid-template-columns:74px 46px 1fr auto; gap:14px;
+    align-items:start; padding:11px 0 11px 10px;
+    border-bottom:1px solid var(--line-soft);
+    border-left:2px solid transparent;
+  }
+  .take:hover{background:#161a1e}
+  .take.bad{border-left-color:var(--bad)}
+  .take.bad .txt{color:var(--dim)}
+  .tc{font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:3px}
+  /* Полоска длины реплики — сколько ты говорил. */
+  .len{padding-top:9px}
+  .len i{display:block;height:3px;background:var(--amber-dim);border-radius:2px}
+  .len span{font-family:var(--mono);font-size:10px;color:var(--faint);display:block;margin-top:4px}
+  .txt{white-space:pre-wrap;word-break:break-word;cursor:text;padding-top:1px}
+  .txt.edited::after{content:" правлено";font-family:var(--mono);font-size:10px;color:var(--ok)}
+  .take textarea{
+    width:100%;background:var(--raise);color:var(--text);font:inherit;
+    border:1px solid var(--amber);border-radius:3px;padding:8px 10px;resize:vertical;
+  }
+  .acts{display:flex;gap:4px;opacity:0;transition:opacity .12s}
+  .take:hover .acts,.take:focus-within .acts,.take.bad .acts{opacity:1}
+  .ico{
+    font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:3px;
+    color:var(--faint);border:1px solid transparent;
+  }
+  .ico:hover{color:var(--text);border-color:var(--line)}
+  .ico.on{color:var(--bad)}
+
+  .empty{padding:60px 10px;color:var(--faint);text-align:center}
+  .empty b{display:block;color:var(--dim);font-size:17px;margin-bottom:8px;font-weight:500}
+
+  /* --- training progress --- */
+  .train{margin-top:36px;padding:18px 20px;background:var(--panel);border-radius:4px}
+  .train h2{margin:0 0 4px;font-size:14px;font-weight:600}
+  .train p{margin:0 0 14px;color:var(--dim);font-size:13px}
+  .meter{height:6px;background:#22282d;border-radius:3px;overflow:hidden}
+  .meter i{display:block;height:100%;background:var(--amber)}
+  .train .nums{
+    display:flex;justify-content:space-between;margin-top:8px;
+    font-family:var(--mono);font-size:11px;color:var(--faint);
+  }
+
+  /* --- model picker --- */
+  .models{margin-top:28px}
+  .models h2{font-size:15px;margin:0 0 6px}
+  .models p{color:var(--dim);font-size:13px;margin:0 0 16px}
+  .mlist{display:flex;flex-direction:column;gap:8px}
+  .mrow{
+    display:flex;align-items:center;gap:14px;padding:12px 16px;
+    background:var(--panel);border:1px solid var(--line);border-radius:4px;
+    cursor:pointer;
+  }
+  .mrow:hover{border-color:var(--amber-dim)}
+  .mrow.on{border-color:var(--amber);background:var(--raise)}
+  .mrow .dot{
+    width:9px;height:9px;border-radius:50%;background:var(--line);flex:none;
+  }
+  .mrow.on .dot{background:var(--amber)}
+  .mrow .name{font-family:var(--mono);font-size:13px;word-break:break-all}
+  .mrow .tag{
+    margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint);
+    text-transform:uppercase;letter-spacing:.08em;flex:none;
+  }
+  .mrow.on .tag{color:var(--amber)}
+  .mnote{
+    margin-top:16px;padding:14px 18px;background:#241c1c;
+    border-left:3px solid var(--bad);border-radius:0 4px 4px 0;
+    font-size:13px;color:var(--dim);
+  }
+  .mnote b{color:var(--bad);display:block;margin-bottom:2px}
+
+  /* --- add a term --- */
+  .add{margin-top:28px;padding:20px 24px;background:var(--panel);
+       border-left:3px solid var(--amber);border-radius:0 4px 4px 0}
+  .add h2{margin:0 0 4px;font-size:15px;font-weight:600}
+  .add p{margin:0 0 14px;color:var(--dim);font-size:13px;max-width:62ch}
+  .add-row{display:flex;gap:8px;flex-wrap:wrap}
+  .add-row .search{max-width:340px}
+  .added{margin-top:12px;display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:3px;
+        background:#22282d;color:var(--ok);border:1px solid #2c3439}
+  .chip.dup{color:var(--faint)}
+
+  /* --- dictionary --- */
+  .files{display:grid;gap:24px;margin-top:28px}
+  .file h2{margin:0 0 2px;font-size:14px;font-weight:600}
+  .file p{margin:0 0 10px;color:var(--dim);font-size:13px}
+  .file textarea{
+    width:100%;min-height:260px;background:var(--panel);color:var(--text);
+    border:1px solid var(--line);border-radius:3px;padding:12px;
+    font-family:var(--mono);font-size:13px;line-height:1.6;resize:vertical;
+  }
+  .file .row{display:flex;align-items:center;gap:12px;margin-top:10px}
+  .hidden{display:none}
+  .toast{
+    position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
+    background:var(--raise);border:1px solid var(--line);border-left:3px solid var(--ok);
+    padding:10px 18px;border-radius:3px;font-family:var(--mono);font-size:12px;
+    opacity:0;pointer-events:none;transition:opacity .18s;z-index:50;
+  }
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <span class="brand">Dictation feed</span>
+    <div class="stats" id="stats"></div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-view="tape">Feed</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="dict">Dictionary</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="model">Model</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="offline" id="offline" hidden>
+    <b>No connection to the dictation app.</b>
+    It is stopped or restarting. This page refreshes itself as soon as it is back.
+    <span id="offline-why"></span>
+  </div>
+
+  <section id="view-tape">
+    <div class="last" id="last" hidden>
+      <div class="last-head">
+        <span id="last-time"></span>
+        <span id="last-len"></span>
+        <span id="last-note"></span>
+      </div>
+      <div class="last-text" id="last-text"></div>
+      <div class="last-actions">
+        <button class="btn primary" id="copy-last">Copy</button>
+        <button class="btn" id="play-last">Listen</button>
+        <button class="btn" id="bad-last">Recognized badly</button>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input class="search" id="q" type="search" placeholder="Search dictations" autocomplete="off">
+      <label class="toggle"><input type="checkbox" id="onlybad"> bad ones only</label>
+    </div>
+
+    <div class="tape" id="tape"></div>
+
+    <div class="train">
+      <h2>Training material for the recognizer</h2>
+      <p>Every dictation stores an audio + text pair. Ones marked bad are left
+         out of training; ones you corrected go in with your own text.</p>
+      <div class="meter"><i id="train-bar" style="width:0"></i></div>
+      <div class="nums"><span id="train-now"></span><span id="train-goal"></span></div>
+    </div>
+  </section>
+
+  <section id="view-dict" class="hidden">
+    <div class="add">
+      <h2>Add your own word</h2>
+      <p>A product, a project, a person — anything you say that the recognizer mangles.
+         Several at once: separate by comma or newline. They go to the top of the list,
+         because only the first ~45 terms are sent to the recognizer as a hint.</p>
+      <div class="add-row">
+        <input class="search" id="new-term" placeholder="Fellow" autocomplete="off">
+        <button class="btn primary" id="add-term">Add</button>
+      </div>
+      <div class="added" id="added"></div>
+    </div>
+
+    <div class="files">
+      <div class="file">
+        <h2>Replacements</h2>
+        <p>What it heard &rarr; what is correct, separated by a TAB. Grows on its own; you can edit it.</p>
+        <textarea id="f-fixes" spellcheck="false"></textarea>
+        <div class="row"><button class="btn primary" data-save="fixes">Save replacements</button></div>
+      </div>
+      <div class="file">
+        <h2>Terms</h2>
+        <p>Your words. The top ~45 are sent to the recognizer as a hint, so put what you say most often first.</p>
+        <textarea id="f-glossary" spellcheck="false"></textarea>
+        <div class="row"><button class="btn primary" data-save="glossary">Save terms</button></div>
+      </div>
+      <div class="file">
+        <h2>Your own-language words</h2>
+        <p>The corrector may not turn these into English terms: &laquo;сессию&raquo; never becomes &laquo;session&raquo;.</p>
+        <textarea id="f-mywords" spellcheck="false"></textarea>
+        <div class="row"><button class="btn primary" data-save="mywords">Save words</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-model" class="hidden">
+    <div class="models">
+      <h2>Corrector model</h2>
+      <p>The second stage: it puts punctuation and capitals back, writes your terms
+         correctly and restores question marks. Runs locally in LM Studio.
+         Pick any chat model you have loaded there — the choice is saved and survives
+         a restart. Recognition itself does not depend on this.</p>
+      <div class="mlist" id="mlist"></div>
+      <div class="mnote" id="mnote" hidden><b></b><span></span></div>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+<audio id="player"></audio>
+
+<script>
+const $ = s => document.querySelector(s);
+const player = $('#player');
+let records = [], editingId = null, lastSeenId = null, filesLoaded = false;
+
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 1600);
+}
+async function api(path, body){
+  const opt = body ? {method:'POST', headers:{'Content-Type':'application/json'},
+                      body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  if(!r.ok) throw new Error('the app answered ' + r.status);
+  return r.json();
+}
+function hhmm(iso){ return (iso||'').slice(11,19) || '--:--:--'; }
+function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+
+function play(id){
+  player.src = '/api/audio?id=' + encodeURIComponent(id);
+  player.play().catch(()=>toast('No audio for this take'));
+}
+async function copy(text){
+  try{ await navigator.clipboard.writeText(text); toast('Copied'); }
+  catch(e){ toast('Could not copy - select it and press Ctrl+C'); }
+}
+async function toggleBad(id, want){
+  await api('/api/mark', {id, bad:want});
+  const r = records.find(x=>x.id===id); if(r) r.bad = want;
+  render();
+}
+async function saveText(id, text){
+  const res = await api('/api/text', {id, text});
+  const r = records.find(x=>x.id===id);
+  if(r){ r.text = text; r.corrected = text; }
+  toast(res.learned && res.learned.length
+        ? 'Saved, and learned ' + res.learned.length + ' replacement(s)'
+        : 'Saved');
+  render();
+}
+
+function renderLast(){
+  const box = $('#last');
+  if(!records.length){ box.hidden = true; return; }
+  const r = records[0];
+  box.hidden = false;
+  $('#last-time').textContent = hhmm(r.time);
+  $('#last-len').textContent = r.seconds ? r.seconds.toFixed(1)+'s of speech' : '';
+  $('#last-note').textContent = r.ms_total ? (r.ms_total/1000).toFixed(2)+'s to process' : '';
+  $('#last-text').textContent = r.text || '(nothing recognized)';
+  $('#bad-last').className = 'btn' + (r.bad ? ' on' : '');
+  $('#bad-last').textContent = r.bad ? 'Marked as bad' : 'Recognized badly';
+  if(lastSeenId && lastSeenId !== r.id){
+    box.classList.remove('fresh'); void box.offsetWidth; box.classList.add('fresh');
+  }
+  lastSeenId = r.id;
+}
+
+function render(){
+  renderLast();
+  const tape = $('#tape');
+  if(!records.length){
+    tape.innerHTML = '<div class="empty"><b>Nothing dictated yet</b>'
+      + 'Hold F13 and say something - the take shows up here.</div>';
+    return;
+  }
+  const maxSec = Math.max(...records.map(r=>r.seconds||0), 1);
+  tape.innerHTML = records.map(r => {
+    const w = Math.max(6, Math.round((r.seconds||0)/maxSec*46));
+    const editing = editingId === r.id;
+    const body = editing
+      ? `<textarea data-edit="${r.id}" rows="3">${esc(r.text)}</textarea>`
+      : `<div class="txt${r.corrected?' edited':''}" data-open="${r.id}">${esc(r.text)||'<span style="color:var(--faint)">empty</span>'}</div>`;
+    return `<div class="take${r.bad?' bad':''}">
+      <div class="tc">${hhmm(r.time)}</div>
+      <div class="len"><i style="width:${w}px"></i><span>${(r.seconds||0).toFixed(1)}с</span></div>
+      <div>${body}</div>
+      <div class="acts">
+        <button class="ico" data-copy="${r.id}" title="Copy">copy</button>
+        ${r.has_audio?`<button class="ico" data-play="${r.id}" title="Listen">audio</button>`:''}
+        <button class="ico${r.bad?' on':''}" data-bad="${r.id}" title="Mark as badly recognized">bad</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const ta = tape.querySelector('textarea[data-edit]');
+  if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
+let pageVersion = null, offline = false;
+
+function setOffline(yes, why){
+  if(offline === yes) return;
+  offline = yes;
+  $('#offline').hidden = !yes;
+  if(yes) $('#offline-why').textContent = why || '';
+}
+
+async function load(){
+  if(editingId) return;                       // do not yank text from under the cursor
+  try{
+    const q = $('#q').value.trim();
+    const bad = $('#onlybad').checked ? '1' : '0';
+    records = await api(`/api/records?limit=300&q=${encodeURIComponent(q)}&bad=${bad}`);
+    const s = await api('/api/stats');
+
+    // The app restarted with a new page - reload instead of hanging on the old one.
+    if(pageVersion === null) pageVersion = s.page_version;
+    else if(s.page_version !== pageVersion){ location.reload(); return; }
+
+    setOffline(false);
+    render();
+    $('#stats').innerHTML =
+        `<span><b>${s.records}</b> takes</span>`
+      + `<span><b>${s.minutes}</b> min of speech</span>`
+      + `<span>usually <b>${(s.median_ms/1000).toFixed(2)}</b> s</span>`
+      + (s.bad ? `<span style="color:var(--bad)"><b>${s.bad}</b> bad</span>` : '');
+    $('#train-bar').style.width = s.train_percent + '%';
+    $('#train-now').textContent = `${s.train_minutes} min collected · ${s.train_records} takes`;
+    $('#train-goal').textContent = `${s.train_target_minutes} min needed · ${s.train_percent}%`;
+  }catch(e){
+    // The app is off or restarting. Staying silent is not an option: the page
+    // would look alive while showing stale takes.
+    setOffline(true, String(e && e.message || e));
+  }
+}
+
+/* --- events --- */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-copy],[data-play],[data-bad],[data-open],[data-save],[data-model],.tab');
+  if(!t) return;
+  if(t.dataset.copy !== undefined){
+    const r = records.find(x=>x.id===t.dataset.copy); if(r) copy(r.text);
+  } else if(t.dataset.play !== undefined){ play(t.dataset.play);
+  } else if(t.dataset.bad !== undefined){
+    const r = records.find(x=>x.id===t.dataset.bad); toggleBad(r.id, !r.bad);
+  } else if(t.dataset.open !== undefined){ editingId = t.dataset.open; render();
+  } else if(t.dataset.save !== undefined){ saveFile(t.dataset.save);
+  } else if(t.dataset.model !== undefined){ pickModel(t.dataset.model);
+  } else if(t.classList.contains('tab')){ switchView(t.dataset.view); }
+});
+
+document.addEventListener('keydown', e => {
+  const ta = e.target.closest('textarea[data-edit]');
+  if(!ta) return;
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); commit(ta); }
+  if(e.key === 'Escape'){ editingId = null; render(); }
+});
+document.addEventListener('focusout', e => {
+  const ta = e.target.closest('textarea[data-edit]');
+  if(ta) commit(ta);
+});
+function commit(ta){
+  const id = ta.dataset.edit, text = ta.value.trim();
+  const r = records.find(x=>x.id===id);
+  editingId = null;
+  if(r && text !== r.text) saveText(id, text); else render();
+}
+
+$('#copy-last')?.addEventListener('click', () => records.length && copy(records[0].text));
+$('#play-last')?.addEventListener('click', () => records.length && play(records[0].id));
+$('#bad-last')?.addEventListener('click',
+  () => records.length && toggleBad(records[0].id, !records[0].bad));
+$('#q')?.addEventListener('input',
+  () => { clearTimeout(window._s); window._s = setTimeout(load, 250); });
+$('#onlybad')?.addEventListener('change', load);
+
+/* --- dictionary --- */
+async function switchView(v){
+  document.querySelectorAll('.tab').forEach(b =>
+    b.setAttribute('aria-selected', String(b.dataset.view === v)));
+  $('#view-tape').classList.toggle('hidden', v !== 'tape');
+  $('#view-dict').classList.toggle('hidden', v !== 'dict');
+  $('#view-model').classList.toggle('hidden', v !== 'model');
+  if(v === 'model') loadModels();      // всегда заново: LM Studio могли перезапустить
+  if(v === 'dict' && !filesLoaded){
+    const f = await api('/api/files');
+    $('#f-fixes').value = f.fixes;
+    $('#f-glossary').value = f.glossary;
+    $('#f-mywords').value = f.mywords;
+    filesLoaded = true;
+  }
+}
+async function addTerm(){
+  const box = $('#new-term'), text = box.value.trim();
+  if(!text) return;
+  const res = await api('/api/term', {text});
+  box.value = '';
+  $('#added').innerHTML =
+      res.added.map(t=>`<span class="chip">${esc(t)} - added</span>`).join('')
+    + res.already.map(t=>`<span class="chip dup">${esc(t)} - already there</span>`).join('');
+  if(res.added.length){
+    const f = await api('/api/files');
+    $('#f-glossary').value = f.glossary;
+    toast('Added - active from the next dictation');
+  }
+  box.focus();
+}
+// Optional chaining: one missing button must not kill the whole script.
+$('#add-term')?.addEventListener('click', addTerm);
+$('#new-term')?.addEventListener('keydown', e => { if(e.key==='Enter') addTerm(); });
+
+/* --- model picker --- */
+let modelsLoaded = false;
+
+async function loadModels(){
+  const box = $('#mlist'), note = $('#mnote');
+  try{
+    const m = await api('/api/models');
+    if(!m.available.length){
+      box.innerHTML = '';
+      note.hidden = false;
+      note.querySelector('b').textContent = 'No model available';
+      note.querySelector('span').textContent = m.why
+        || 'Start LM Studio and load a chat model, then reopen this tab.';
+      return;
+    }
+    note.hidden = true;
+    box.innerHTML = m.available.map(id => `
+      <div class="mrow${id===m.current?' on':''}" data-model="${esc(id)}">
+        <span class="dot"></span>
+        <span class="name">${esc(id)}</span>
+        <span class="tag">${id===m.current?'in use':'use'}</span>
+      </div>`).join('');
+    modelsLoaded = true;
+  }catch(e){
+    box.innerHTML = '';
+    note.hidden = false;
+    note.querySelector('b').textContent = 'Could not read the model list';
+    note.querySelector('span').textContent = String(e && e.message || e);
+  }
+}
+
+async function pickModel(id){
+  try{
+    await api('/api/model', {model:id});
+    toast('Corrector switched to ' + id);
+    await loadModels();
+  }catch(e){
+    toast('Could not switch: ' + (e && e.message || e));
+  }
+}
+
+async function saveFile(which){
+  const map = {fixes:'#f-fixes', glossary:'#f-glossary', mywords:'#f-mywords'};
+  await api('/api/files', {which, text: $(map[which]).value});
+  toast('Saved - active from the next dictation');
+}
+
+load();
+setInterval(load, 3000);
+</script>
+</body>
+</html>

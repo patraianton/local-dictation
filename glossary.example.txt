@@ -1,0 +1,31 @@
+# Your words: names, products and terms the recognizer keeps getting wrong.
+# One per line. Lines starting with # are comments.
+# The first ~45 go straight into the recognizer as a hint (it cannot take more),
+# so put what you say most often at the top.
+# The whole list is sent to the corrector model.
+# Copy this file to glossary.txt and edit it. Changes are picked up live.
+
+# --- people ---
+# Names of colleagues. Keep them at the top: the recognizer mangles names most.
+
+# --- every day ---
+Claude Code
+Codex
+GitHub
+Linear
+Slack
+loop
+worktree
+API
+CRM
+prod
+deploy
+env
+
+# --- English words you say in Russian ---
+CLI
+fallback
+skill
+funnel
+intent
+resume
