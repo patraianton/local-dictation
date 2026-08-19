@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Сравнение вариантов распознавалки: что быстрее и насколько.
+r"""Comparing recognizer settings: what is faster, and by how much.
 
     ..\.venv\Scripts\python.exe compare.py sample-en.wav
 """

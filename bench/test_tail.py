@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Проверка дозаписи хвоста: последнее слово не должно теряться.
+"""Checks tail recording: the last word must not be lost.
+
+No real microphone needed: the stream is faked and audio is fed in by hand.
+Measured 2026-08-15: 47% of takes were cut off mid-sound — people release the
 
     ..\\.venv\\Scripts\\python.exe test_tail.py
-
-Настоящий микрофон не нужен: поток подделан, звук подаётся вручную.
-Замер 15.08.2026: 47% записей обрывались на звуке — человек отпускает клавишу,
-ещё договаривая слово.
 """
 import sys
 import threading
@@ -110,7 +109,7 @@ def main() -> None:
     out = rec.stop(tail_s=0.4)
     check(out.size == 0, "остановка без записи ничего не ломает")
 
-    print(f"\n{'всё сошлось' if not bad else str(bad) + ' не сошлось'}")
+    print(f"\n{'all passed' if not bad else str(bad) + ' failed'}")
     sys.exit(1 if bad else 0)
 
 

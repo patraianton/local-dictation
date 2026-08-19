@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Проверка приглушения чужого звука.
+"""Checks the ducking of other applications' audio.
+
+No real Windows needed: the audio sources are faked, and what is checked is the
+logic — who gets touched, what is remembered, what is restored.
 
     ..\\.venv\\Scripts\\python.exe test_duck.py
-
-Настоящий Windows тут не нужен: источники звука подделаны, проверяется логика —
-кого трогаем, что запоминаем, что возвращаем.
 """
 import json
 import sys
@@ -144,7 +144,7 @@ def main() -> None:
     check(app.vol == 1.0, "быстрое нажатие не оставляет звук приглушённым",
           f"вышло {app.vol}")
 
-    print(f"\n{'всё сошлось' if not bad else str(bad) + ' не сошлось'}")
+    print(f"\n{'all passed' if not bad else str(bad) + ' failed'}")
     sys.exit(1 if bad else 0)
 
 

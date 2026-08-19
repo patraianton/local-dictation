@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Проверка выбора модели корректора на странице.
+"""Checks the corrector model picker on the page.
+
+LM Studio is not needed: the corrector is faked. What is checked is what the
+page does — listing models, switching, writing the choice into config.toml.
 
     ..\\.venv\\Scripts\\python.exe test_models_api.py
-
-LM Studio для этого не нужен: корректор подделан. Проверяется то, что делает
-страница — список моделей, переключение, запись выбора в config.toml.
 """
 import json
 import shutil
@@ -150,7 +150,7 @@ def main() -> None:
         cfg_mod.CONFIG_PATH = real_cfg
         shutil.rmtree(tmpdir, ignore_errors=True)
 
-    print(f"\n{'всё сошлось' if not bad else str(bad) + ' не сошлось'}")
+    print(f"\n{'all passed' if not bad else str(bad) + ' failed'}")
     sys.exit(1 if bad else 0)
 
 

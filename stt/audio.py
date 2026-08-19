@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Запись с микрофона."""
+"""Recording from the microphone."""
 import threading
 import time
 
@@ -10,7 +10,7 @@ TARGET_SR = 16000
 
 
 def list_inputs() -> list[dict]:
-    """Все устройства записи с именем хост-подсистемы."""
+    """Every input device, with the name of its host API."""
     apis = sd.query_hostapis()
     out = []
     for idx, dev in enumerate(sd.query_devices()):
@@ -27,17 +27,17 @@ def list_inputs() -> list[dict]:
     return out
 
 
-# Один и тот же микрофон Windows показывает несколько раз — через разные
-# подсистемы, и они принимают разные форматы. У RØDE PodMic: MME берёт 16 кГц
-# моно как есть, а WASAPI требует 48 кГц стерео и всё равно срывается на старте.
-# Поэтому порядок именно такой, и мы перебираем, пока что-то не откроется.
+# Windows shows the same microphone several times, once per host API, and
+# they accept different formats. With the RODE PodMic: MME takes 16 kHz mono as
+# is, while WASAPI demands 48 kHz stereo and still stumbles on startup. Hence
+# this order — we walk it until something opens.
 HOSTAPI_ORDER = ("MME", "Windows DirectSound", "Windows WASAPI", "Windows WDM-KS")
 
 
 def find_devices(name_hint: str) -> list:
-    """Все подходящие входы по куску названия, от самого надёжного к остальным.
+    """Every matching input for a name fragment, most reliable first.
 
-    Последним всегда идёт None — микрофон Windows по умолчанию.
+    None always comes last — the Windows default microphone.
     """
     if not name_hint:
         return [None]
@@ -51,7 +51,7 @@ def find_devices(name_hint: str) -> list:
 
 
 def find_device(name_hint: str):
-    """Первый подходящий вход — для показа в проверках и журнале."""
+    """The first matching input — for self-checks and the log."""
     return find_devices(name_hint)[0]
 
 
@@ -63,8 +63,8 @@ def _resample(audio: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
 
         return soxr.resample(audio, src_sr, dst_sr).astype(np.float32)
     except ImportError:
-        # Запасной вариант: усреднение соседних отсчётов вместо фильтра.
-        # Хуже по качеству, но лучше, чем ничего.
+        # Fallback: averaging neighbouring samples instead of filtering.
+        # Worse quality, but better than nothing.
         ratio = src_sr / dst_sr
         n = int(len(audio) / ratio)
         idx = (np.arange(n) * ratio).astype(np.int64)
@@ -72,10 +72,10 @@ def _resample(audio: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
 
 
 class Recorder:
-    """Пишет моно-звук в память, пока идёт запись."""
+    """Records mono audio into memory while recording is on."""
 
     def __init__(self, devices=None, samplerate: int = TARGET_SR):
-        # Принимаем и один вход, и список — чтобы было что перебирать.
+        # Accept a single device or a list, so there is something to walk.
         if devices is None or isinstance(devices, int):
             devices = [devices]
         self.devices = list(devices)
@@ -85,7 +85,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._open_sr = samplerate
         self._open_ch = 1
-        self.recipe = None  # что сработало — дальше открываем сразу этим
+        self.recipe = None  # what worked; reuse it directly next time
         self.last_error = ""
 
     @property
@@ -98,7 +98,7 @@ class Recorder:
             self._chunks.append(np.asarray(block, dtype=np.float32).copy())
 
     def _recipes(self):
-        """Способы открыть микрофон, от самого желанного к любому рабочему."""
+        """Ways to open the mic, from the preferred one to anything that works."""
         if self.recipe:
             yield self.recipe
             return
@@ -137,21 +137,21 @@ class Recorder:
                         stream.close()
                     except Exception:
                         pass
-                errors.append(f"{dev}/{sr}Гц/{ch}кан: {str(exc)[:60]}")
+                errors.append(f"{dev}/{sr}Hz/{ch}ch: {str(exc)[:60]}")
                 continue
             self._stream = stream
             self._open_sr, self._open_ch = sr, ch
             self.recipe = (dev, sr, ch)
             return
         self.last_error = " | ".join(errors[:3])
-        raise RuntimeError(f"не удалось открыть микрофон: {self.last_error}")
+        raise RuntimeError(f"could not open the microphone: {self.last_error}")
 
     def _samples(self) -> int:
         with self._lock:
             return sum(len(c) for c in self._chunks)
 
     def _last_samples(self, n: int) -> np.ndarray:
-        """Последние n отсчётов из уже записанного."""
+        """The last n samples of what has been recorded so far."""
         if n <= 0:
             return np.zeros(0, dtype=np.float32)
         with self._lock:
@@ -172,18 +172,18 @@ class Recorder:
         return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
 
     def _wait_tail(self, max_tail_s: float, quiet_ms: int, rel: float) -> None:
-        """Дописывает хвост после отпускания клавиши.
+        """Keeps recording for a moment after the key is released.
 
-        Человек отпускает клавишу, ещё договаривая последнее слово — и оно
-        пропадало. Замерено 15.08.2026: у 47% записей в конце не было ни одного
-        тихого кадра, то есть звук резался на полуслове.
+        People release the key while still finishing the last word, and that
+        word was being thrown away. Measured 2026-08-15: 47% of takes had not a
+        single quiet frame at the end, i.e. the audio was cut mid-word.
 
-        Ждём не всегда до упора: как только пошла тишина — останавливаемся.
-        Если он отпустил уже в паузе, задержки почти нет.
+        It does not always wait the full time: as soon as silence starts, it
+        stops. Release during a pause and the delay is almost nothing.
         """
         if max_tail_s <= 0:
             return
-        # За «громкость речи» берём последнюю секунду записи.
+        # "Speech level" is taken from the last second of the recording.
         base = self._rms(self._last_samples(self._open_sr))
         thr = max(base * rel, 0.004)
         step = 0.02
@@ -205,9 +205,9 @@ class Recorder:
 
     def stop(self, tail_s: float = 0.0, quiet_ms: int = 120,
              quiet_rel: float = 0.12) -> np.ndarray:
-        """Останавливает запись и отдаёт звук 16 кГц моно.
+        """Stops recording and returns 16 kHz mono audio.
 
-        tail_s — сколько максимум дописывать после команды «стоп».
+        tail_s — how long to keep recording after the stop command, at most.
         """
         if self._stream is None:
             return np.zeros(0, dtype=np.float32)
@@ -240,14 +240,14 @@ class Recorder:
 
 
 def loudness(audio: np.ndarray) -> tuple[float, float]:
-    """(пик, среднеквадратичная громкость) — чтобы понять, что микрофон молчит."""
+    """(peak, RMS level) — used to tell whether the mic is silent."""
     if audio.size == 0:
         return 0.0, 0.0
     return float(np.abs(audio).max()), float(np.sqrt(np.mean(audio**2)))
 
 
 def normalize(audio: np.ndarray) -> np.ndarray:
-    """Тихую запись подтягиваем по громкости, громкую не трогаем."""
+    """Quiet takes are pulled up; loud ones are left alone."""
     peak, _ = loudness(audio)
     if 0.0 < peak < 0.25:
         return (audio * (0.5 / peak)).astype(np.float32)

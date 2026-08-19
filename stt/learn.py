@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Обучение на твоей речи.
+"""Learning from your own speech.
 
-Три вещи:
-1. Журнал — что услышала, что вставила, сколько заняло (logs/ГГГГ-ММ-ДД.jsonl).
-2. Звук + текст на будущее дообучение распознавалки (recordings/).
-3. Автословарь — если причёсывающая модель раз за разом чинит одно и то же
-   слово, оно попадает в fixes.tsv навсегда и дальше чинится мгновенно.
+Three things:
+1. A log of what was heard, what was pasted and how long it took
+   (logs/YYYY-MM-DD.jsonl).
+2. Audio + text pairs for fine-tuning the recognizer later (recordings/).
+3. A self-growing dictionary: when the corrector fixes the same word again and
+   again, it lands in fixes.tsv for good and is fixed instantly from then on.
 """
 import difflib
 import json
@@ -21,7 +22,7 @@ from .fixes import yo_key
 TOKEN_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 
-# Слова-паразиты: их удаление — не «ошибка распознавания», в словарь не тащим.
+# Filler words: dropping one is not a "recognition error", so never learn it.
 FILLERS = {
     "э", "ээ", "эээ", "а", "аа", "ну", "вот", "типа", "как", "бы", "это",
     "самое", "значит", "короче", "так", "там", "то", "есть", "мм", "ммм", "угу",
@@ -37,7 +38,7 @@ def has_letters(s: str) -> bool:
 
 
 def candidate_pairs(raw: str, polished: str, max_span: int = 3) -> list[tuple[str, str]]:
-    """Что именно причёсывающая модель переписала. Только замены слов."""
+    """What exactly the corrector rewrote. Word substitutions only."""
     a, b = tokens(raw), tokens(polished)
     if not a or not b:
         return []
@@ -56,9 +57,10 @@ def candidate_pairs(raw: str, polished: str, max_span: int = 3) -> list[tuple[st
             continue
         if src.lower() == dst.lower():
             continue
-        # Разница только в «е/ё» — не ошибка распознавания, а выбор по смыслу:
-        # «все» и «всё» разные слова. Слепой словарь тут не помощник, решает
-        # корректор, он видит соседние слова. Подробности — в fixes.py::add.
+        # Differing only by "е"/"ё" is not a recognition error but a choice
+        # of meaning: "все" and "всё" are different words. A blind dictionary
+        # cannot help here; the corrector decides, because it sees the
+        # neighbouring words. Details in fixes.py::add.
         if yo_key(src) == yo_key(dst):
             continue
         if not has_letters(src) or not has_letters(dst):
@@ -89,7 +91,7 @@ class Learner:
                 self.candidates = {}
 
     def observe(self, raw: str, polished: str) -> list[tuple[str, str]]:
-        """Считает правки модели. Возвращает пары, доросшие до словаря."""
+        """Counts the model's edits. Returns pairs that graduated into the dictionary."""
         if not self.enabled or not raw or not polished:
             return []
         promoted = []
@@ -116,7 +118,7 @@ class Learner:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def save_audio(self, audio: np.ndarray, text: str, stamp: str) -> str | None:
-        """Звук + текст парой — это материал для дообучения на твоём голосе."""
+        """An audio + text pair: the material for fine-tuning on your voice."""
         if not self.keep_audio or audio.size == 0 or not text.strip():
             return None
         day = datetime.now().strftime("%Y-%m-%d")

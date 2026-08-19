@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Кнопка мыши как горячая клавиша — и окно, в которое вставлять.
+"""A mouse button as a hotkey, plus finding the window to paste into.
 
-Нужно для случая «вставка улетела не туда»: наводишь на нужное окно, жмёшь
-боковую кнопку — текст оказывается там.
+For the "it pasted into the wrong window" case: point at the right window,
+press a side button, and the text lands there.
 """
 import ctypes
 from ctypes import wintypes
@@ -17,8 +17,8 @@ WM_XBUTTONDOWN, WM_XBUTTONUP = 0x020B, 0x020C
 WM_MBUTTONDOWN, WM_MBUTTONUP = 0x0207, 0x0208
 
 BUTTONS = {
-    "x1": mouse.Button.x1,     # боковая «назад»
-    "x2": mouse.Button.x2,     # боковая «вперёд»
+    "x1": mouse.Button.x1,     # side "back"
+    "x2": mouse.Button.x2,     # side "forward"
     "middle": mouse.Button.middle,
 }
 
@@ -34,7 +34,7 @@ class MSLLHOOKSTRUCT(ctypes.Structure):
 
 
 def window_under_cursor() -> int:
-    """Верхнее окно под указателем мыши."""
+    """The topmost window under the mouse pointer."""
     pt = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(pt))
     hwnd = user32.WindowFromPoint(pt)
@@ -51,10 +51,10 @@ def window_title(hwnd: int) -> str:
 
 
 def focus(hwnd: int) -> bool:
-    """Делает окно активным.
+    """Brings a window to the foreground.
 
-    Windows не даёт фоновой программе просто так забрать фокус, поэтому
-    ненадолго присоединяемся к потоку текущего активного окна — тогда даёт.
+    Windows will not let a background app just take focus, so we briefly attach
+    to the input thread of the currently active window — then it allows it.
     """
     if not hwnd or hwnd == user32.GetForegroundWindow():
         return bool(hwnd)
@@ -72,10 +72,10 @@ def focus(hwnd: int) -> bool:
 
 
 class Hook:
-    """Слушает мышь и зовёт on_press, когда нажата одна из нужных кнопок.
+    """Listens to the mouse and calls on_press for the wanted buttons.
 
-    Кнопок можно указать несколько через запятую — тогда не надо гадать,
-    какая из боковых какая: сработает любая.
+    Several buttons may be listed, comma-separated — then there is no need to
+    guess which side button is which: any of them fires.
     """
 
     def __init__(self, buttons: str, on_press, suppress: bool = False):
@@ -99,7 +99,7 @@ class Hook:
         want_middle = mouse.Button.middle in self.buttons
 
         def event_filter(msg, data):
-            """Съедаем свои кнопки, чтобы браузер не ушёл назад/вперёд."""
+            """Swallow our buttons so the browser does not go back/forward."""
             if not self.suppress:
                 return True
             if want_x and msg in (WM_XBUTTONDOWN, WM_XBUTTONUP):
@@ -129,15 +129,15 @@ class Hook:
 
 
 def watch(seconds: int = 12) -> None:
-    """Показывает, какие кнопки шлёт мышь. Ничего не перехватывает."""
+    """Shows which buttons the mouse sends. Intercepts nothing."""
     import time
 
     seen = {}
     names = {
-        mouse.Button.left: "левая", mouse.Button.right: "правая",
-        mouse.Button.middle: "средняя (колёсико)",
-        mouse.Button.x1: "боковая «назад» — в настройках x1",
-        mouse.Button.x2: "боковая «вперёд» — в настройках x2",
+        mouse.Button.left: "left", mouse.Button.right: "right",
+        mouse.Button.middle: "middle (wheel)",
+        mouse.Button.x1: 'side "back" — x1 in the settings',
+        mouse.Button.x2: 'side "forward" — x2 in the settings',
     }
 
     def on_click(x, y, button, pressed):  # noqa: ARG001
@@ -146,8 +146,8 @@ def watch(seconds: int = 12) -> None:
         seen[button] = True
         print(f"  {names.get(button, str(button))}")
 
-    print(f"Жми кнопки мыши, которые хочешь отдать под вставку. Слушаю {seconds} секунд.")
-    print("(левую и правую не трогай — они и так заняты)\n")
+    print(f"Press the mouse buttons you want to use for pasting. Listening {seconds} s.")
+    print("(leave left and right alone — they are already taken)\n")
     listener = mouse.Listener(on_click=on_click)
     listener.start()
     time.sleep(seconds)
@@ -156,7 +156,7 @@ def watch(seconds: int = 12) -> None:
     print()
     free = [b for b in seen if b not in (mouse.Button.left, mouse.Button.right)]
     if not free:
-        print("Свободных кнопок не поймал.")
-        print("Если боковых нет — впиши в config.toml -> [repaste] key = \"f14\"")
+        print("No free buttons caught.")
+        print('No side buttons? Set config.toml -> [repaste] key = "f14"')
     else:
-        print("Годятся. Впиши выбранное в config.toml -> [repaste] button")
+        print("These will do. Put your pick in config.toml -> [repaste] button")

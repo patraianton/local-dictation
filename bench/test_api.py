@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Проверка страницы диктовок: все действия, которые делает браузер.
+"""Checks the dictation page: every action the browser performs.
 
-Диктовка должна быть запущена.
+The app has to be running.
+
     ..\\.venv\\Scripts\\python.exe test_api.py
 """
 import sys
@@ -115,7 +116,7 @@ def report() -> None:
     bad = [c for c in checks if not c[0]]
     for ok, what, detail in checks:
         print(f"[{'v' if ok else 'X'}] {what}" + (f"  — {detail}" if detail else ""))
-    print(f"\n{len(checks)-len(bad)} из {len(checks)} сошлось")
+    print(f"\n{len(checks)-len(bad)} of {len(checks)} passed")
     sys.exit(1 if bad else 0)
 
 

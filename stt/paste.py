@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Вставка текста в то окно, где стоит курсор.
+"""Pastes text into whatever window currently has the cursor.
 
-Через буфер обмена, а не посимвольным набором: набор кириллицы посимвольно
-медленный и ломается в терминалах. Ctrl+V работает везде одинаково.
+Through the clipboard, not by typing character by character: typing Cyrillic
+one key at a time is slow and breaks inside terminals. Ctrl+V behaves the same
+everywhere.
 """
 import threading
 import time
@@ -29,13 +30,13 @@ def _read_clipboard() -> str:
 
 
 def paste_text(text: str, hotkey: str = "ctrl+v", restore_after: float = 1.0) -> bool:
-    """Кладёт текст в буфер, жмёт Ctrl+V, потом возвращает буфер как был."""
+    """Puts the text on the clipboard, sends Ctrl+V, then restores the clipboard."""
     if not text:
         return False
     saved = _read_clipboard()
     if not _copy(text):
         return False
-    time.sleep(0.04)  # буфер обмена в Windows успевает не сразу
+    time.sleep(0.04)  # the Windows clipboard needs a moment to settle
     keyboard.send(hotkey)
 
     if saved and restore_after > 0:

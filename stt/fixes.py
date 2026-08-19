@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Словарь замен: «что услышала» -> «как правильно».
+"""Replacement dictionary: "what it heard" -> "what is correct".
 
-Файл fixes.tsv, четыре колонки через табуляцию:
-    услышала <TAB> правильно <TAB> сколько раз пригодилось <TAB> auto|manual
-Пополняется сам (см. learn.py) и руками — можно просто дописать строку.
+File fixes.tsv, four TAB-separated columns:
+    heard <TAB> correct <TAB> times it helped <TAB> auto|manual
+It grows on its own (see learn.py) and by hand — just append a line.
 """
 import re
 import threading
 from pathlib import Path
 
 
-# Замена начинается с русской строчной буквы — значит это обычное слово,
-# а не название со своим написанием.
+# A replacement starting with a lowercase Cyrillic letter is an ordinary word,
+# not a name that carries its own spelling.
 CYRILLIC_LOWER_RE = re.compile(r"[а-яё]", re.UNICODE)
 
 
 def yo_key(word: str) -> str:
-    """«ё» и «е» — это одно и то же написание, а не разные слова."""
+    """"ё" and "е" are two spellings of one letter, not two different words."""
     return word.lower().replace("ё", "е")
 
 
@@ -50,7 +50,7 @@ class Fixes:
         if not self.pairs:
             self._regex = None
             return
-        # Длинные сначала, иначе короткое совпадение съест длинное.
+        # Longest first, otherwise a short match eats a longer one.
         keys = sorted(self.pairs, key=len, reverse=True)
         body = "|".join(re.escape(k) for k in keys)
         self._regex = re.compile(rf"(?<!\w)({body})(?!\w)", re.IGNORECASE | re.UNICODE)
@@ -67,14 +67,14 @@ class Fixes:
             count += 1
             said = m.group(1)
             dst = pairs[said.lower()][0]
-            # Регистр берём у услышанного. В словаре замены записаны маленькими
-            # буквами, а распознавалка ставит заглавную в начале предложения:
-            # без этого «Все, закончили.» превращалось в «все, закончили.».
+            # Case comes from what was heard. Replacements are stored lowercase,
+            # but the recognizer capitalizes the first word of a sentence:
+            # without this, "Все, закончили." came out as "все, закончили.".
             #
-            # Только для русских слов. У названий написание своё и оно главнее:
-            # «herdr» и «worktree» пишутся маленькими всегда, а «iPhone» — так,
-            # как записано. Заглавную в начале предложения им поставит корректор,
-            # он видит, где предложение начинается.
+            # Ordinary words only. Names carry their own spelling and it wins:
+            # "herdr" and "worktree" are always lowercase, "iPhone" stays as
+            # written. The corrector capitalizes them at a sentence start — it
+            # is the one that can see where a sentence begins.
             if said[:1].isupper() and CYRILLIC_LOWER_RE.match(dst):
                 dst = dst[:1].upper() + dst[1:]
             return dst
@@ -82,15 +82,17 @@ class Fixes:
         return regex.sub(sub, text), count
 
     def add(self, src: str, dst: str, origin: str = "auto") -> bool:
-        """Добавляет пару. Возвращает True, если пара новая.
+        """Adds a pair. Returns True if the pair is new.
 
-        Две пары сюда не пускаем совсем — обе однажды испортили текст:
-        - разница только в «е/ё», добавляет машина. «все» и «всё» — разные
-          слова, вслепую их менять нельзя: вышло «на всё статьи», «всё
-          картинки», «всё звонки». По смыслу решает корректор, он видит
-          соседние слова. Руками такую пару добавить можно — человек видит смысл.
-        - встречная пара. Уже случалось: «все -> всё» И «всё -> все» лежали
-          рядом и воевали, портя текст в обе стороны.
+        Two kinds of pair are refused outright — both have corrupted text before:
+
+        - the two sides differ only by "е"/"ё" AND the machine proposed it.
+          "все" (everybody) and "всё" (everything) are different words; swapping
+          them blindly produced "на всё статьи", "всё картинки", "всё звонки".
+          Only the corrector can decide, because it sees the neighbouring words.
+          A human may still add such a pair by hand.
+        - the reverse pair already exists. This happened: "все -> всё" AND
+          "всё -> все" sat side by side and fought, breaking text both ways.
         """
         src, dst = src.strip(), dst.strip()
         if not src or not dst or src.lower() == dst.lower():
@@ -115,8 +117,8 @@ class Fixes:
 
     def _save_locked(self) -> None:
         lines = [
-            "# услышала\tправильно\tсколько раз\tоткуда",
-            "# Можно дописывать руками. Перезапуск не нужен только для ручной правки через окно.",
+            "# heard\tcorrect\ttimes used\tsource",
+            "# Safe to edit by hand. Picked up live, no restart needed.",
         ]
         for key in sorted(self.pairs):
             dst, hits, origin = self.pairs[key]

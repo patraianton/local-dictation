@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Чтение config.toml и словарей."""
+"""Reading config.toml and the user dictionaries."""
 import re
 import tomllib
 from pathlib import Path
@@ -10,8 +10,9 @@ GLOSSARY_PATH = ROOT / "glossary.txt"
 MYWORDS_PATH = ROOT / "mywords.txt"
 FIXES_PATH = ROOT / "fixes.tsv"
 CANDIDATES_PATH = ROOT / "state" / "candidates.json"
-# Куда записываем чужую громкость на время диктовки. Если программу убьют прямо
-# во время записи, при следующем запуске мы вернём звук по этому файлу.
+# Where the volume of other apps is written down while you dictate. If the app
+# gets killed mid-recording, the next start reads this file and gives the sound
+# back.
 DUCK_STATE_PATH = ROOT / "state" / "duck.json"
 LOG_DIR = ROOT / "logs"
 REC_DIR = ROOT / "recordings"
@@ -23,7 +24,7 @@ def load() -> dict:
 
 
 def glossary() -> list[str]:
-    """Термины из glossary.txt в порядке файла."""
+    """Terms from glossary.txt, in file order."""
     if not GLOSSARY_PATH.exists():
         return []
     out = []
@@ -35,11 +36,11 @@ def glossary() -> list[str]:
 
 
 def mywords() -> set[str]:
-    """Русские слова, которые Антон реально говорит.
+    """Ordinary words of the speaker's own language.
 
-    Корректору запрещено подменять их на английские термины: «сессию» должно
-    остаться «сессию», а не превратиться в «session». Список собирается из его
-    же расшифровок командой `run.ps1 learnwords`.
+    The corrector is not allowed to swap these for English terms: "сессию" has
+    to stay "сессию" instead of turning into "session". The list is built from
+    the speaker's own transcripts with `run.ps1 learnwords`.
     """
     if not MYWORDS_PATH.exists():
         return set()
@@ -60,10 +61,10 @@ MODEL_LINE_RE = re.compile(r"^\s*model\s*=")
 
 
 def set_polish_model(name: str) -> bool:
-    """Записывает выбранную модель корректора в config.toml.
+    """Writes the chosen corrector model into config.toml.
 
-    Правим одну строку, а не переписываем файл целиком: в config.toml каждая
-    настройка объяснена комментарием, и терять эти объяснения нельзя.
+    Rewrites one line instead of the whole file: every setting in config.toml
+    carries a comment explaining why it is set that way, and those must survive.
     """
     if not name or not CONFIG_PATH.exists():
         return False

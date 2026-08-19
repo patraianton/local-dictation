@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Вернёт ли корректор вопросительный знак.
+"""Will the corrector restore a question mark.
 
-Первые 7 — настоящие потерянные вопросы с записей Антона.
-Остальные — утверждения, на которые «?» ставить нельзя.
-
-    ..\\.venv\\Scripts\\python.exe test_questions.py [модель]
+The first 7 are real lost questions from actual recordings.
+The rest are statements that must not get a "?".
 """
 import sys
 from pathlib import Path

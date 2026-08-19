@@ -1,39 +1,43 @@
 # -*- coding: utf-8 -*-
-"""Приказ против обещания: «сделай» и «сделаю».
+"""An order versus a promise: "do it" and "I will do it".
 
-Зачем. Антон диктует команды агентам, а распознавалка слышит окончание -й как -ю
-и переворачивает смысл: «ты сделай» становится «я сделаю», и агент отвечает
-«отлично, иди делай». Замерено на 377 записях: 6 таких случаев.
+Why this matters. The speaker dictates orders to agents, and the recognizer
+hears the imperative ending as a first-person one, inverting the meaning:
+"you do it" becomes "I will do it", and the agent answers "great, go ahead".
+Measured on 377 takes: 6 such cases.
 
-Почему это НЕ чинится правилом. Проверено на тех же 377 записях: слепая замена
-по списку глаголов дала 10 срабатываний, из них 5 неверных — «схожу и посмотрю,
-что там как» превращалось в «посмотри». Отличить приказ от рассказа о себе можно
-только по смыслу всего предложения, а не по окончанию.
+Why a rule does NOT fix it. Checked on the same 377 takes: a blind swap driven
+by a verb list fired 10 times, 5 of them wrong — "I will go and see how it is"
+turned into "go and see". Telling an order from a person talking about
+themselves needs the meaning of the whole sentence, not the ending of one word.
 
-Что работает на самом деле, по замерам на 383 записях:
+What actually works, measured on 383 takes:
 
-1. ПОДСКАЗКА РАСПОЗНАВАЛКЕ с глаголами-приказами (asr.py, стиль "commands").
-   Главное средство: 4 потерянных приказа -> 2. Работает потому, что здесь есть
-   звук — а в звуке разница между «-й» и «-ю» правда есть.
-2. КОРРЕКТОР может переключить форму глагола, но только из списка PAIRS: замок
-   в polish.py пропускает эту одну подмену и ничего больше. Проверено: чинит
-   ещё 2 случая из 5 и ни разу не портит те, где человек говорит о себе.
-3. Ты сам: Shift+F13 или правка на странице — и пара запоминается навсегда.
+1. THE HINT TO THE RECOGNIZER, built from imperative verbs (asr.py, the
+   "commands" style). The main lever: 4 lost orders -> 2. It works because at
+   that point there is still audio, and in the audio the two endings really do
+   differ.
+2. THE CORRECTOR may flip a verb form, but only within the PAIRS list below:
+   the lock in polish.py lets that single substitution through and nothing
+   else. Measured: fixes 2 more cases out of 5 and never breaks the ones where
+   the speaker really is talking about themselves.
+3. You: Shift+F13, or an edit on the page — the pair is then remembered forever.
 
-Что НЕ работает и почему (чтобы не пробовать заново):
-- Слепое правило по списку глаголов (apply ниже): 10 срабатываний, 5 неверных.
-  «Схожу и посмотрю, что там как» -> «посмотри». Выключено в настройках.
-- Отдельный вопрос модели «приказ или о себе» (decide ниже): модель звука не
-  слышит и просто следует формулировке вопроса. С наводящим вопросом 5 из 5 на
-  приказах и 2 из 5 на «о себе»; с нейтральным — ровно наоборот. Не используется.
+What does NOT work, and why (so nobody tries again):
+- The blind verb-list rule (apply() below): 10 hits, 5 of them wrong.
+  "I will go and see how it is" -> "go and see". Disabled in the settings.
+- Asking the model directly, "order or about themselves?" (decide() below): the
+  model cannot hear the audio and simply follows the phrasing of the question.
+  With a leading question it scored 5/5 on orders and 2/5 on self-statements;
+  with a neutral one, exactly the reverse. Not used.
 """
 import re
 from functools import lru_cache
 
-# Пары «как услышала» -> «как надо». Левая часть — первое лицо («я сделаю»),
-# правая — повелительное («сделай»). Дописывать сюда безопасно.
+# Pairs "as heard" -> "as meant". Left side is first person ("I will do"),
+# right side is the imperative ("do"). Safe to extend.
 PAIRS = {
-    # правильные: повелительное на -й
+    # imperatives ending in -й
     "сделаю": "сделай",
     "делаю": "делай",
     "запускаю": "запускай",
@@ -56,14 +60,14 @@ PAIRS = {
     "отгружаю": "отгружай",
     "synkаю": "синкай",
     "синкаю": "синкай",
-    # повелительное на -ь
+    # imperatives ending in -ь
     "проверю": "проверь",
     "поправлю": "поправь",
     "поставлю": "поставь",
     "отправлю": "отправь",
     "добавлю": "добавь",
     "готовлю": "готовь",
-    # повелительное на -и
+    # imperatives ending in -и
     "посмотрю": "посмотри",
     "покажу": "покажи",
     "скажу": "скажи",
@@ -92,9 +96,10 @@ PAIRS = {
     "перенесу": "перенеси",
 }
 
-# Если рядом стоит «я» или «мы» — это правда о себе, не приказ. Не трогаем.
+# If "я" or "мы" ("I"/"we") stands nearby, it really is about the speaker,
+# not an order. Leave it alone.
 SELF = {"я", "мы"}
-# Разбивка на предложения: искать «я» надо в пределах одной фразы.
+# Split into sentences: "я" only protects the sentence it appears in.
 SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+")
 TOKEN = re.compile(r"([^\W_]+)", re.UNICODE)
 
@@ -119,9 +124,9 @@ def _fix_sentence(sentence: str) -> tuple[str, list[tuple[str, str]]]:
     return "".join(parts), changed
 
 
-# Вопрос намеренно без подсказок в одну сторону: наводящая формулировка
-# («он весь день раздаёт поручения») давала 5 из 5 на приказах и ломала
-# 3 из 5 там, где человек говорит о себе. Модель просто соглашалась.
+# The question is deliberately not slanted either way: a leading phrasing
+# ("he hands out orders all day long") scored 5/5 on orders but broke 3 out of
+# 5 self-statements. The model was simply agreeing with the prompt.
 QUESTION = """Фраза, надиктованная голосом:
 «{sentence}»
 
@@ -137,12 +142,12 @@ QUESTION = """Фраза, надиктованная голосом:
 
 
 def candidates(text: str) -> list[tuple[str, str, str]]:
-    """Спорные глаголы во фразе: (слово, повелительная форма, его предложение)."""
+    """Ambiguous verbs in a phrase: (word, imperative form, its sentence)."""
     out = []
     for sentence in SENT_SPLIT.split(text or ""):
         words = TOKEN.split(sentence)[1::2]
         if any(w.lower() in SELF for w in words):
-            continue  # сказал «я» или «мы» — вопрос не нужен
+            continue  # said "I" or "we": no need to ask
         for word in words:
             imp = PAIRS.get(word.lower())
             if imp:
@@ -151,9 +156,9 @@ def candidates(text: str) -> list[tuple[str, str, str]]:
 
 
 def decide(text: str, ask) -> tuple[str, list[tuple[str, str]]]:
-    """Спрашивает модель про каждый спорный глагол и чинит только приказы.
+    """Asks the model about each ambiguous verb and fixes orders only.
 
-    ask(prompt) -> str. Любой сбой или невнятный ответ = не трогаем.
+    ask(prompt) -> str. Any failure or unclear answer means: leave it alone.
     """
     changed: list[tuple[str, str]] = []
     result = text
@@ -163,7 +168,7 @@ def decide(text: str, ask) -> tuple[str, list[tuple[str, str]]]:
                 sentence=sentence, word=word, imperative=imp)) or "").strip()
         except Exception:
             continue
-        # Ждём одно слово. Всё, что не равно повелительной форме, — не трогаем.
+        # One word expected. Anything but the imperative form is left alone.
         first = re.sub(r"[^\w]", "", answer.split()[0] if answer.split() else "").lower()
         if first != imp.lower():
             continue
@@ -175,8 +180,8 @@ def decide(text: str, ask) -> tuple[str, list[tuple[str, str]]]:
     return result, changed
 
 
-# Повелительные формы целиком — включая те, у которых нет пары в PAIRS.
-# Нужны, чтобы запретить корректору лепить «?» на поручение.
+# Whole imperative forms, including those with no counterpart in PAIRS.
+# Used to stop the corrector from sticking a "?" on an order.
 IMPERATIVES = set(PAIRS.values()) | {
     "дай", "иди", "смотри", "слушай", "чини", "бери", "пиши", "ставь", "жги",
     "давай", "начни", "хватит", "прекрати", "сотри", "перепиши", "перезапусти",
@@ -185,8 +190,8 @@ IMPERATIVES = set(PAIRS.values()) | {
 }
 
 
-# Вопросительные слова. «-то» и «-нибудь» отсекаем: «какую-то сводку» —
-# это не вопрос.
+# Question words. Forms with "-то" and "-нибудь" are excluded: "какую-то
+# сводку" ("some summary or other") is not a question.
 ASK_RE = re.compile(
     r"(?<!\w)(что|чего|чем|почему|зачем|сколько|где|когда|куда|откуда|кто|кого|"
     r"кому|как|какой|какая|какое|какие|какую|каком|каким|чей|ли)"
@@ -195,10 +200,12 @@ ASK_RE = re.compile(
 )
 
 
-# Разбор слова по словарю русского языка. Нужен, чтобы узнавать приказ по форме,
-# а не по списку: список написан руками и дыры в нём будут всегда — на «Переводи
-# их на ажур» 14.08.2026 корректор влепил знак вопроса именно поэтому.
-# Библиотеки нет — работаем по списку, как раньше. Диктовка от этого не ломается.
+# Morphological analysis against a Russian dictionary. Needed to recognize an
+# imperative by its form rather than from a list: a hand-written list will
+# always have holes — that is exactly why the corrector stuck a question mark on
+# "Переводи их на ажур" on 2026-08-14.
+# If the library is missing, fall back to the list as before. Dictation still
+# works either way.
 try:
     import pymorphy3
 
@@ -209,14 +216,15 @@ except Exception:  # pragma: no cover — на машине без библио�
 
 @lru_cache(maxsize=4096)
 def is_imperative(word: str) -> bool:
-    """Приказ ли это слово.
+    """Is this word an imperative.
 
-    Сначала список: в нём есть то, чего словарь не знает («синкай»), и то, что
-    он разбирает иначе («удали» для него ещё и форма слова «удаль»).
-    Потом разбор: он закрывает дыры списка.
+    The list first: it holds words the dictionary does not know ("синкай") and
+    words it reads differently ("удали" is also a form of the noun "удаль").
+    Then the morphology, which closes the holes in the list.
 
-    Берём только ЛУЧШИЙ разбор. «Статьи», «доски», «деньги» тоже имеют где-то в
-    хвосте разбор-приказ, и если брать любой — правило съест настоящие вопросы.
+    Only the TOP parse counts. "Статьи", "доски", "деньги" all have an
+    imperative parse somewhere down the list, and accepting any parse would make
+    the rule eat real questions.
     """
     w = word.lower()
     if w in IMPERATIVES:
@@ -232,10 +240,11 @@ WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 
 @lru_cache(maxsize=4096)
 def _impr_and_past(word: str) -> bool:
-    """У слова есть И разбор-приказ, И разбор прошедшего времени.
+    """The word has BOTH an imperative parse AND a past-tense parse.
 
-    «Пришли» — это и «пришли мне файл», и «деньги пришли». Таких слов мало,
-    но они опасны: словарь считает приказ главным разбором.
+    "Пришли" is both "send me the file" and "the money arrived". There are few
+    such words, but they are dangerous: the dictionary ranks the imperative
+    first.
     """
     if _MORPH is None:
         return False
@@ -247,7 +256,7 @@ def _impr_and_past(word: str) -> bool:
 
 @lru_cache(maxsize=4096)
 def _may_be_subject(word: str) -> bool:
-    """Слово может быть подлежащим — существительное или местоимение в именительном."""
+    """Could this word be a subject: a noun or pronoun in the nominative."""
     if _MORPH is None:
         return False
     return any(
@@ -257,10 +266,11 @@ def _may_be_subject(word: str) -> bool:
 
 
 def _has_subject_before(sentence: str, pos: int) -> bool:
-    """Есть ли подлежащее перед этим местом в той же части фразы.
+    """Is there a subject before this position, within the same clause.
 
-    Часть фразы считаем от последней запятой: «Ключи пришли, пришли мне ещё» —
-    в первой части подлежащее есть, во второй нет.
+    A clause starts after the last comma: in "Ключи пришли, пришли мне ещё"
+    ("The keys arrived, send me more") the first clause has a subject, the
+    second does not.
     """
     start = max(
         sentence.rfind(",", 0, pos),
@@ -274,23 +284,23 @@ def _has_subject_before(sentence: str, pos: int) -> bool:
 
 
 def starts_with_command(sentence: str) -> bool:
-    """Поручение, а не вопрос — значит знак вопроса тут лишний.
+    """An order, not a question — so a question mark here is wrong.
 
-    Признак: глагол-приказ стоит РАНЬШЕ вопросительного слова.
+    The test: the imperative verb stands EARLIER than the question word.
 
-        «Ты мне скажи, какие журналы ты читал»  — приказ (скажи < какие)
-        «Какие журналы ты читал?»               — вопрос (приказа нет)
+        "Ты мне скажи, какие журналы ты читал"  — an order (скажи < какие)
+        "Какие журналы ты читал?"               — a question (no imperative)
 
-    Почему по порядку слов, а не по первому слову. Приказ бывает где угодно:
-    в начале («Переводи их на ажур»), после вводного («Хорошо, ставь CRM
-    мониторить»), в конце («У нас есть ролик про Bitrix, найди его»). А
-    вопросительное слово внутри поручения — это не вопрос, а то, ЧТО именно
-    надо сделать: «объясни мне, когда будет результат».
+    Why word order rather than the first word. An order can sit anywhere: at the
+    start ("Переводи их на ажур"), after a filler ("Хорошо, ставь CRM
+    мониторить"), or at the end ("У нас есть ролик про Bitrix, найди его").
+    A question word inside an order is not a question but a statement of WHAT
+    exactly to do: "объясни мне, когда будет результат".
 
-    Цена решения, выбранная Антоном осознанно 14.08.2026: знак снимается и с
-    вежливых поручений вроде «Посчитай, сколько их у нас?» — их 28 из 327 фраз
-    со знаком вопроса. Причина: знак вопроса на поручении заставляет агента
-    переспрашивать вместо того, чтобы делать.
+    The price, chosen deliberately by the owner on 2026-08-14: the mark is also
+    removed from polite requests such as "Посчитай, сколько их у нас?" — 28 out
+    of 327 sentences carrying a question mark. Reason: a question mark on an
+    order makes an agent ask back instead of doing the work.
     """
     if not sentence:
         return False
@@ -299,33 +309,34 @@ def starts_with_command(sentence: str) -> bool:
     for m in WORD_RE.finditer(sentence):
         word = m.group(0)
         if is_imperative(word):
-            # У приказа не бывает подлежащего перед ним в той же части фразы:
-            # «Деньги пришли?», «Все ключи уже пришли?» — это прошедшее время,
-            # а не «пришли мне ключи». Проверяем только слова, у которых есть
-            # оба разбора, иначе «Ещё раз объясни мне» спрячется за словом «раз»,
-            # а «Ты мне скажи» — за словом «ты».
+            # An imperative never has a subject before it in the same
+            # clause: "Деньги пришли?", "Все ключи уже пришли?" are past tense,
+            # not "send me the keys". Only ambiguous words are checked;
+            # otherwise "Ещё раз объясни мне" would hide behind "раз", and
+            # "Ты мне скажи" behind "ты".
             if _impr_and_past(word) and _has_subject_before(sentence, m.start()):
                 continue
             return ask_pos is None or m.start() < ask_pos
         if ask_pos is not None and m.start() > ask_pos:
-            break  # вопросительное слово раньше любого приказа — это вопрос
+            break  # question word before any imperative: it is a question
     return False
 
 
-# Союзы, с которых начинается не отдельная мысль, а хвост предыдущей:
-# «Сделай мне CSV. Чтобы я мог спотчекнуть, как они выглядят.» Вопросом такое
-# предложение быть не может, и знак на нём — ошибка корректора (случай 14.08.2026,
-# помечен «плохо»). Внутри почти всегда стоит вопросительное слово («как», «что»),
-# поэтому проверкой ASK_RE, как у приказов, тут не обойтись.
+# Conjunctions that start not a separate thought but the tail of the previous
+# one: "Сделай мне CSV. Чтобы я мог спотчекнуть, как они выглядят."
+# Such a sentence cannot be a question, and a mark on it is a corrector error
+# (a real case from 2026-08-14, marked bad by the owner). There is almost always
+# a question word inside ("как", "что"), so the ASK_RE test used for orders is
+# not enough here.
 SUBORDINATE = {"чтобы", "чтоб"}
 
-# Короткий переспрос «Чтобы что?» — настоящий вопрос. Отличаем по длине:
-# хвост прошлой мысли всегда длиннее.
+# The short retort "Чтобы что?" ("So that what?") is a real question. Length
+# tells them apart: the tail of a previous thought is always longer.
 SUBORDINATE_MIN_WORDS = 4
 
 
 def starts_with_subordinate(sentence: str) -> bool:
-    """Придаточное предложение — продолжение прошлой мысли, а не вопрос."""
+    """A subordinate clause: a continuation of the previous thought, not a question."""
     words = TOKEN.split(sentence or "")[1::2]
     if len(words) < SUBORDINATE_MIN_WORDS:
         return False
@@ -333,17 +344,17 @@ def starts_with_subordinate(sentence: str) -> bool:
 
 
 def flip_allowed(said: str, other: str) -> bool:
-    """Разрешена ли корректору такая подмена: это две формы одного глагола?
+    """May the corrector make this substitution: are these two forms of one verb?
 
-    Только «сделаю» <-> «сделай» и подобное из списка PAIRS, в обе стороны.
-    Всё остальное замок откатит.
+    Only "сделаю" <-> "сделай" and the like, from the PAIRS list, in either
+    direction. The lock rolls back everything else.
     """
     a, b = said.lower(), other.lower()
     return PAIRS.get(a) == b or PAIRS.get(b) == a
 
 
 def apply(text: str) -> tuple[str, list[tuple[str, str]]]:
-    """(исправленный текст, что именно поменяли)."""
+    """(corrected text, what exactly was changed)."""
     if not text:
         return text, []
     out, changed = [], []

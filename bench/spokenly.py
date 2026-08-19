@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Разбор истории Spokenly: сколько там речи Антона и что она даёт.
+"""Digging through the Spokenly history: how much speech is there.
+
+    ..\\.venv\\Scripts\\python.exe spokenly.py words [how many]
 
     ..\\.venv\\Scripts\\python.exe spokenly.py stats
-    ..\\.venv\\Scripts\\python.exe spokenly.py words [сколько]
 """
 import json
 import re
