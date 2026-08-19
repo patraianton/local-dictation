@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Качаем модели-корректоры прямо в папку LM Studio (с докачкой при обрыве)."""
+"""Downloads corrector models straight into the LM Studio folder (resumable)."""
 import sys
 import time
 from pathlib import Path

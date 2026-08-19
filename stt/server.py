@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Страница диктовок: локальный сервер на 127.0.0.1.
+"""The dictation page: a local server on 127.0.0.1.
 
-Наружу не смотрит — только на этот компьютер. Пароля нет и не нужно.
+It does not face the outside world, only this machine. No password, none needed.
 """
 import json
 import threading
@@ -16,18 +16,18 @@ PAGE = Path(__file__).resolve().parent / "web" / "index.html"
 
 
 class Handler(BaseHTTPRequestHandler):
-    fixes = None      # подставляется при запуске, чтобы правки учили словарь
-    on_terms = None   # зовём, когда список терминов изменился
-    polisher = None   # корректор: панель показывает и переключает его модель
-    # HTTP/1.1 нужен, чтобы работал заголовок Expect: 100-continue — без него
-    # строгие клиенты обрывают POST на полпути (браузер бы проглотил, но
-    # проверять такой сервер нечем).
+    fixes = None      # injected at startup so edits can teach the dictionary
+    on_terms = None   # called when the term list has changed
+    polisher = None   # the corrector: the page shows and switches its model
+    # HTTP/1.1 is needed for the Expect: 100-continue header to work: without
+    # it, strict clients abort a POST halfway (a browser would swallow it, but
+    # then such a server could not be tested).
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *args):  # тишина в консоли
+    def log_message(self, *args):  # keep the console quiet
         pass
 
-    # --- вспомогательное ---
+    # --- helpers ---
     def _send(self, code: int, body: bytes, ctype: str) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -52,7 +52,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
-    # --- маршруты ---
+    # --- routes ---
     def do_GET(self):  # noqa: N802
         url = urlparse(self.path)
         q = parse_qs(url.query)
@@ -74,9 +74,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/stats":
             st = store.stats()
-            # Метка версии страницы: если файл изменился, открытая вкладка
-            # перезагрузит себя сама. Иначе она молча остаётся на старом коде
-            # и «умирает», когда сервер меняется.
+            # A page version stamp: if the file changed, an open tab reloads
+            # itself. Otherwise it silently stays on the old code and "dies"
+            # when the server changes underneath it.
             try:
                 st["page_version"] = int(PAGE.stat().st_mtime)
             except OSError:
@@ -136,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
             name = (body.get("model") or "").strip()
             if self.polisher is None or not self.polisher.use_model(name):
                 return self._json({"ok": False, "model": name}, 400)
-            # Записываем в настройки, иначе выбор потеряется при перезапуске.
+            # Persist to the settings, or the choice is lost on restart.
             saved = cfg_mod.set_polish_model(name)
             return self._json({"ok": True, "model": name, "saved": saved})
 
@@ -152,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
                 "mywords": cfg_mod.MYWORDS_PATH,
             }.get(which)
             if not target:
-                return self._json({"error": "неизвестный файл"}, 400)
+                return self._json({"error": "unknown file"}, 400)
             store.write_file(target, text)
             if which == "fixes" and self.fixes is not None:
                 self.fixes.load()
@@ -164,7 +164,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def start(port: int = 8756, fixes=None, on_terms=None, polisher=None) -> str:
-    """Поднимает страницу в отдельном потоке. Возвращает адрес."""
+    """Starts the page on its own thread. Returns the address."""
     Handler.fixes = fixes
     Handler.on_terms = staticmethod(on_terms) if on_terms else None
     Handler.polisher = polisher

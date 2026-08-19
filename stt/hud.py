@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Точка в углу экрана: пишет / думаю / готово.
+"""A dot in the corner of the screen: recording / thinking / done.
 
-Окно принципиально не берёт фокус — иначе вставка уйдёт не в то окно.
+The window deliberately never takes focus — otherwise the paste would land in
+the wrong place.
 """
 import ctypes
 import queue
@@ -12,12 +13,12 @@ TRANSPARENT = "#010203"
 
 COLORS = {
     "idle": None,
-    "rec": "#e5484d",       # пишу (держишь клавишу)
-    "lock": "#f5a524",      # пишу без рук
-    "think": "#ffd166",     # распознаю / причёсываю
-    "ok": "#3dd68c",        # вставлено
-    "warn": "#8b8f98",      # ничего не услышала
-    "err": "#c85cff",       # сломалось
+    "rec": "#e5484d",       # recording (key held)
+    "lock": "#f5a524",      # recording hands-free
+    "think": "#ffd166",     # recognizing / correcting
+    "ok": "#3dd68c",        # pasted
+    "warn": "#8b8f98",      # heard nothing
+    "err": "#c85cff",       # broke
 }
 
 GWL_EXSTYLE = -20
@@ -41,11 +42,11 @@ class Hud:
         self._rec_started = 0.0
         self._visible = False
 
-    # --- вызывается из любых потоков ---
+    # --- callable from any thread ---
     def set(self, state: str, text: str = "", hide_after: float = 0.0) -> None:
         self.q.put((state, text, hide_after))
 
-    # --- внутреннее, главный поток ---
+    # --- internals, main thread only ---
     def build(self) -> None:
         self.root = tk.Tk()
         self.root.withdraw()
@@ -82,7 +83,7 @@ class Hud:
         self.root.after(40, self._pump)
 
     def _no_focus(self) -> None:
-        """Окно не должно активироваться и ловить клики."""
+        """The window must never activate or catch clicks."""
         try:
             hwnd = ctypes.windll.user32.GetParent(self.win.winfo_id())
             if not hwnd:
@@ -129,8 +130,8 @@ class Hud:
             text = f"{text} {int(secs // 60)}:{int(secs % 60):02d}".strip()
         self.canvas.itemconfig(self.dot, fill=color)
         self.canvas.itemconfig(self.label, text=text)
-        # Показываем только при смене состояния: постоянный deiconify моргает
-        # и может увести фокус из окна, куда мы собираемся вставлять текст.
+        # Show only on a state change: calling deiconify constantly flickers
+        # and can steal focus from the window we are about to paste into.
         if not self._visible:
             self.win.deiconify()
             self.win.attributes("-topmost", True)

@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Приказ против обещания — на настоящих фразах Антона.
+"""Order versus promise, on real phrases.
 
-Пять фраз, где надо вернуть повелительную форму, и пять, где трогать нельзя
-(он говорит о себе). Все взяты из его записей. Слепое правило по списку
-глаголов даёт здесь 5 из 10 — проверяем, лучше ли справляется корректор.
+Five phrases where the imperative has to be restored, and five where nothing may
+be touched (the speaker is talking about themselves). All taken from real
 
-Диктовка должна быть запущена (нужен LM Studio).
     ..\\.venv\\Scripts\\python.exe test_person.py
 """
 import sys

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Чиним лицо глагола там, где для этого есть данные — в звуке.
+"""Fixing the person of a verb where the data for it exists: in the audio.
 
-Модель-корректор звука не слышит и просто угадывает по формулировке вопроса.
-Распознавалка слышит. Проверяем, вытягивает ли подсказка с приказами.
+The corrector model cannot hear the audio and simply guesses from the phrasing
+of the question. The recognizer can hear it. Checks whether the imperative hint
+pulls its weight.
 
     ..\\.venv\\Scripts\\python.exe test_prompt_person.py
 """

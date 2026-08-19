@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Очная ставка на настоящем голосе Антона.
+"""Head-to-head on the owner's real voice.
 
-Берём записи из истории Spokenly и прогоняем через локальные модели.
-Рядом — то, что выдал ElevenLabs Scribe (за который Антон платит).
-
-    ..\\.venv\\Scripts\\python.exe ab.py [сколько_записей]
+Takes recordings from the Spokenly history and runs them through the local
+models. Next to each: what ElevenLabs Scribe produced (a paid service, used as
+the reference).
 """
 import json
 import sys

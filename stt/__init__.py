@@ -1,2 +1,2 @@
 # -*- coding: utf-8 -*-
-"""Локальная диктовка: горячая клавиша -> whisper на 5090 -> текст в активном окне."""
+"""Local dictation: a hotkey -> whisper on the GPU -> text in the active window."""

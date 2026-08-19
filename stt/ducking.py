@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Приглушение чужого звука на время диктовки.
+"""Ducking other applications' audio while you dictate.
 
-Зажал клавишу — YouTube, музыка и всё остальное становятся тихими. Отпустил —
-возвращаются как были. Своей громкости не касаемся.
+Hold the key and YouTube, music and everything else go quiet. Release it and
+they come back exactly as they were. Our own volume is never touched.
 
-Правило то же, что и везде в этой программе: если что-то пошло не так — молча
-не делаем ничего. Диктовка из-за звука ломаться не должна.
+Same rule as everywhere else in this program: if anything goes wrong, do
+nothing, quietly. Dictation must not break because of the sound.
 """
 import json
 import os
@@ -15,12 +15,12 @@ from pathlib import Path
 
 
 def log(msg: str) -> None:
-    # Тот же вид, что и в основном журнале. Отдельно, чтобы не тащить __main__.
+    # Same shape as the main log. Kept separate so as not to import __main__.
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
 class Session:
-    """Один источник звука. Обёртка, чтобы Windows-часть можно было подменить."""
+    """One audio source. A wrapper so the Windows part can be faked in tests."""
 
     def __init__(self, pid: int, name: str, get, set_):
         self.pid = pid
@@ -43,7 +43,7 @@ class Session:
 
 
 def windows_sessions() -> list[Session]:
-    """Все программы, которые сейчас могут играть звук."""
+    """Every application that could be playing audio right now."""
     from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 
     out = []
@@ -56,7 +56,7 @@ def windows_sessions() -> list[Session]:
         out.append(
             Session(
                 pid=proc.pid if proc else 0,
-                name=(proc.name() if proc else "система"),
+                name=(proc.name() if proc else "system"),
                 get=ctl.GetMasterVolume,
                 set_=ctl.SetMasterVolume,
             )
@@ -77,7 +77,7 @@ class Ducker:
         self._want = False
         self.saved: dict[int, tuple[str, float]] = {}
 
-    # ---------- что трогаем ----------
+    # ---------- what we touch ----------
     def _targets(self) -> list[Session]:
         out = []
         for s in self._sessions():
@@ -88,12 +88,12 @@ class Ducker:
             out.append(s)
         return out
 
-    # ---------- сама работа ----------
+    # ---------- the work itself ----------
     def _do_duck(self) -> None:
         saved: dict[int, tuple[str, float]] = {}
         for s in self._targets():
             vol = s.volume()
-            # Тише, чем нам надо, — не трогаем: иначе мы сделаем ГРОМЧЕ.
+            # Already quieter than our target: leave it, or we would make it LOUDER.
             if vol is None or vol <= self.level:
                 continue
             if s.set_volume(self.level):
@@ -108,8 +108,8 @@ class Ducker:
         by_pid = {s.pid: s for s in self._sessions()}
         for pid, (name, vol) in self.saved.items():
             s = by_pid.get(pid)
-            # Имя сверяем: номер процесса Windows переиспользует, и не хотелось бы
-            # выкрутить громкость чужой программе, занявшей освободившийся номер.
+            # Check the name too: Windows reuses process ids, and we do not
+            # want to set the volume of whatever app took a freed-up id.
             if s is not None and s.name == name:
                 s.set_volume(vol)
         self.saved = {}
@@ -123,24 +123,24 @@ class Ducker:
                 elif not self._want and self.saved:
                     self._do_restore()
             except Exception as exc:
-                log(f"звук приглушить/вернуть не вышло: {type(exc).__name__}: {exc}")
+                log(f"could not duck/restore audio: {type(exc).__name__}: {exc}")
 
-    # ---------- наружу ----------
+    # ---------- public ----------
     def duck(self) -> None:
-        """Приглушить. Возвращается сразу, работа идёт в стороне."""
+        """Duck. Returns immediately; the work happens on another thread."""
         if not self.enabled:
             return
         self._want = True
         threading.Thread(target=self._apply, daemon=True).start()
 
     def restore(self) -> None:
-        """Вернуть как было."""
+        """Put everything back the way it was."""
         if not self.enabled:
             return
         self._want = False
         threading.Thread(target=self._apply, daemon=True).start()
 
-    # ---------- страховка от падения ----------
+    # ---------- safety net for a crash ----------
     def _write_state(self, saved: dict) -> None:
         try:
             if saved:
@@ -156,10 +156,10 @@ class Ducker:
             pass
 
     def recover(self) -> int:
-        """Вернуть громкость после того, как программу убили во время записи.
+        """Restore volumes after the app was killed mid-recording.
 
-        Зовётся один раз при запуске. Без этого чужой звук остался бы тихим
-        навсегда, и человек бы не понял, почему.
+        Called once at startup. Without it, other apps would stay quiet forever
+        and nobody would understand why.
         """
         try:
             if not self.state_path.exists():
@@ -171,7 +171,7 @@ class Ducker:
         n = len(self.saved)
         if n:
             self._do_restore()
-            log(f"вернул громкость {n} программам после прошлого запуска")
+            log(f"restored the volume of {n} app(s) from the previous run")
         else:
             self._write_state({})
         return n

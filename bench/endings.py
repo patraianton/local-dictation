@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Ищем перевёрнутый смысл: «сделай» услышано как «сделаю».
+"""Hunting for inverted meaning: "do it" heard as "I will do it".
 
-Сравниваем нашу расшифровку с ElevenLabs и оставляем только те расхождения,
-где слова отличаются лишь окончанием — это и есть подмена приказа на обещание.
+Compares our transcript with the ElevenLabs one and keeps only the differences
+where the words differ by their ending alone — that is exactly an order turned
+into a promise.
 
     ..\\.venv\\Scripts\\python.exe endings.py
 """

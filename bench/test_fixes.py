@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Проверка словаря замен: заглавные буквы и запрет вредных пар.
+"""Checks the replacement dictionary: capitals and forbidden pairs.
+
+Every case comes from a real failure on 2026-08-14:
+- "Все, закончили." turned into "все, закончили." — the dictionary ate the
+  capital letter;
 
     ..\\.venv\\Scripts\\python.exe test_fixes.py
-
-Все случаи — из настоящих сбоев 14.08.2026:
-- «Все, закончили.» превратилось в «все, закончили.» — словарь съел заглавную;
-- в словарь сами добавились встречные пары «все -> всё» И «всё -> все»,
-  они воевали друг с другом и испортили текст в 7 диктовках.
 """
 import sys
 import tempfile
@@ -17,7 +16,7 @@ from stt.fixes import Fixes  # noqa: E402
 
 
 def make(pairs: list[tuple[str, str]]) -> Fixes:
-    """Словарь во временном файле — настоящий fixes.tsv не трогаем."""
+    """A dictionary in a temp file — the real fixes.tsv is never touched."""
     fh = tempfile.NamedTemporaryFile(
         "w", suffix=".tsv", delete=False, encoding="utf-8"
     )
@@ -27,55 +26,55 @@ def make(pairs: list[tuple[str, str]]) -> Fixes:
     return Fixes(Path(fh.name))
 
 
-# --- 1. замена не должна терять заглавную букву ---
+# --- 1. a replacement must not lose the capital letter ---
 APPLY_CASES = [
-    # (пары словаря, что услышала, что должно получиться, зачем проверяем)
+    # (dictionary pairs, what was heard, what must come out, why)
     (
         [("еще", "ещё")],
         "Еще раз, все остальное сделали.",
         "Ещё раз, все остальное сделали.",
-        "заглавная в начале предложения сохраняется",
+        "the capital at the start of a sentence is preserved",
     ),
     (
         [("еще", "ещё")],
         "Давай еще раз.",
         "Давай ещё раз.",
-        "в середине предложения буква остаётся маленькой",
+        "mid-sentence the letter stays lowercase",
     ),
     (
         [("хердер", "herdr")],
         "Иди в Хердер и посмотри.",
         "Иди в herdr и посмотри.",
-        "у названия написание своё: herdr маленькими, даже если услышала с большой",
+        "a name keeps its own spelling: herdr stays lowercase even if heard capitalized",
     ),
     (
         [("айфон", "iPhone")],
         "Айфон дай сюда.",
         "iPhone дай сюда.",
-        "у термина со своими заглавными написание не трогаем (iPhone, не IPhone)",
+        "a term with its own capitals is left as written (iPhone, not IPhone)",
     ),
     (
         [("work tree", "worktree")],
         "Work tree открой.",
         "worktree открой.",
-        "название латиницей заглавную не получает — её поставит корректор",
+        "a Latin-script name gets no capital here: the corrector adds it",
     ),
     (
         [("щас", "сейчас")],
         "Щас сделаю.",
         "Сейчас сделаю.",
-        "русское слово заглавную в начале предложения получает",
+        "an ordinary word does get a capital at the start of a sentence",
     ),
     (
         [("хендовер", "handover")],
         "Сделай хендовер.",
         "Сделай handover.",
-        "маленькая буква остаётся маленькой",
+        "a lowercase letter stays lowercase",
     ),
 ]
 
-# --- 2. какие пары словарь принимать НЕ должен ---
-# (что уже есть, что добавляем, откуда, вернёт ли True, окажется ли в словаре, зачем)
+# --- 2. which pairs the dictionary must REFUSE ---
+# (existing pairs, pair to add, origin, returns True?, ends up stored?, why)
 ADD_CASES = [
     (
         [("все", "всё")],
@@ -83,7 +82,7 @@ ADD_CASES = [
         "auto",
         False,
         False,
-        "встречная пара: «все->всё» и «всё->все» воюют друг с другом",
+        "a reverse pair: the two would fight each other",
     ),
     (
         [],
@@ -91,7 +90,7 @@ ADD_CASES = [
         "auto",
         False,
         False,
-        "сам себе «е/ё» не придумывает: все и всё — разные слова",
+        "the machine does not invent e/yo pairs: they are different words",
     ),
     (
         [],
@@ -99,7 +98,7 @@ ADD_CASES = [
         "manual",
         True,
         True,
-        "руками «е/ё» добавить можно — человек видит смысл",
+        "a human may add an e/yo pair by hand: they can see the meaning",
     ),
     (
         [],
@@ -107,7 +106,7 @@ ADD_CASES = [
         "auto",
         True,
         True,
-        "обычную замену по-прежнему учит сам",
+        "an ordinary replacement is still learned automatically",
     ),
     (
         [("луп", "loop")],
@@ -115,7 +114,7 @@ ADD_CASES = [
         "auto",
         False,
         True,
-        "уже известную пару новой не считает, но из словаря не выкидывает",
+        "a known pair is not counted as new, but is not thrown away either",
     ),
 ]
 
@@ -130,9 +129,9 @@ def main() -> None:
         bad += 0 if ok else 1
         print(f"[{'v' if ok else 'X'}] {why}")
         if not ok:
-            print(f"      сказал: {said}")
-            print(f"      ждали:  {want}")
-            print(f"      вышло:  {got}")
+            print(f"      said:   {said}")
+            print(f"      wanted:  {want}")
+            print(f"      got:     {got}")
 
     for pairs, (src, dst), origin, want_added, want_in_dict, why in ADD_CASES:
         fx = make(pairs)
@@ -142,12 +141,12 @@ def main() -> None:
         bad += 0 if ok else 1
         print(f"[{'v' if ok else 'X'}] {why}")
         if not ok:
-            print(f"      добавляли: {src} -> {dst} ({origin})")
-            print(f"      ждали: новая={want_added}, в словаре={want_in_dict}")
-            print(f"      вышло: новая={got_added}, в словаре={in_dict}")
+            print(f"      adding: {src} -> {dst} ({origin})")
+            print(f"      wanted: new={want_added}, stored={want_in_dict}")
+            print(f"      got:    new={got_added}, stored={in_dict}")
 
     total = len(APPLY_CASES) + len(ADD_CASES)
-    print(f"\n{total-bad} из {total} сошлось")
+    print(f"\n{total-bad} of {total} passed")
     sys.exit(1 if bad else 0)
 
 

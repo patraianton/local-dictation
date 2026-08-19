@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Хранилище диктовок: журналы, пометки и правки.
+"""Storage for takes: logs, marks and corrections.
 
-Журналы (logs/*.jsonl) пишет сама диктовка и больше не трогает — они только
-для чтения. Всё, что ты меняешь руками на странице, лежит отдельно, в
-state/marks.json: пометка «плохо» и исправленный текст.
+The logs (logs/*.jsonl) are written by the app itself and never touched again —
+they are read-only. Everything you change by hand on the page lives separately
+in state/marks.json: the "bad" mark and the corrected text.
 """
 import json
 import threading
@@ -15,7 +15,7 @@ from . import config as cfg_mod
 MARKS_PATH = cfg_mod.ROOT / "state" / "marks.json"
 _LOCK = threading.Lock()
 
-# Сколько часов твоей речи нужно, чтобы дообучать распознавалку под твой голос.
+# How many hours of your speech are needed to fine-tune the recognizer.
 TRAINING_TARGET_HOURS = 2.5
 
 
@@ -47,8 +47,9 @@ def _read_log_lines() -> list[dict]:
                 rec = json.loads(line)
             except Exception:
                 continue
-            # У старых записей нет своего номера — собираем из дня и строки.
-            # Без «#»: в адресе он означает якорь, и звук по такой ссылке теряется.
+            # Old takes have no id of their own — build one from day + line.
+            # No "#" in it: in a URL that means an anchor, and the audio link
+            # would break.
             rec.setdefault("id", f"{day}_line{n:04d}")
             rec["day"] = day
             out.append(rec)
@@ -56,7 +57,7 @@ def _read_log_lines() -> list[dict]:
 
 
 def records(limit: int = 200, query: str = "", only_bad: bool = False) -> list[dict]:
-    """Диктовки, новые сверху, вместе с пометками и правками."""
+    """Takes, newest first, together with their marks and corrections."""
     marks = _load_marks()
     out = []
     for rec in reversed(_read_log_lines()):
@@ -119,11 +120,12 @@ def set_bad(rec_id: str, bad: bool) -> dict:
 
 
 def set_text(rec_id: str, text: str, fixes=None) -> dict:
-    """Сохраняет твой правильный текст.
+    """Saves your corrected text.
 
-    Он идёт в два места: на страницу (чтобы копировать уже верное) и в пару
-    «звук + текст» рядом с записью — это и есть материал для дообучения.
-    Заодно разница между услышанным и твоей правкой учит словарь.
+    It goes to two places: the page (so you copy the right thing) and the
+    audio + text pair next to the recording — that is the fine-tuning material.
+    The difference between what was heard and your correction also teaches the
+    replacement dictionary.
     """
     text = text.strip()
     learned = []
@@ -151,7 +153,7 @@ def set_text(rec_id: str, text: str, fixes=None) -> dict:
 
 
 def delete(rec_id: str) -> dict:
-    """Убирает запись из списка и стирает звук с диска."""
+    """Removes a take from the list and deletes its audio from disk."""
     removed = False
     for rec in _read_log_lines():
         if rec.get("id") != rec_id:
@@ -181,7 +183,7 @@ def stats() -> dict:
     times = [r.get("ms_total", 0) for r in recs if r.get("ms_total")]
     times.sort()
 
-    # Материал для дообучения: записи со звуком, не помеченные как плохие.
+    # Training material: takes that have audio and are not marked bad.
     train_sec = 0.0
     train_n = 0
     for r in recs:
@@ -208,11 +210,11 @@ def stats() -> dict:
 
 
 def add_terms(text: str) -> dict:
-    """Добавляет термины в самый верх glossary.txt.
+    """Adds terms at the very top of glossary.txt.
 
-    Наверх — потому что в подсказку распознавалке уходят только первые ~45
-    строк: то, что добавлено сейчас, нужнее всего.
-    Можно вписать сразу несколько — по одному в строке или через запятую.
+    At the top, because only the first ~45 lines are sent to the recognizer as
+    a hint: whatever was just added is what is needed most.
+    Several at once are fine — one per line or comma-separated.
     """
     wanted = []
     for chunk in text.replace(",", "\n").splitlines():
@@ -231,7 +233,7 @@ def add_terms(text: str) -> dict:
     if not added:
         return {"added": [], "already": already}
 
-    # Вставляем сразу после шапки из комментариев.
+    # Insert right after the comment header.
     head = 0
     for i, ln in enumerate(lines):
         if ln.strip() and not ln.startswith("#"):

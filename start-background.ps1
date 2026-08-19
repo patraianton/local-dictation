@@ -1,8 +1,8 @@
-# Запускает диктовку отдельным процессом — она живёт сама по себе и не зависит
-# от окна, из которого её запустили.
-#   .\start-background.ps1          — поднять (если уже работает, ничего не делает)
-#   .\start-background.ps1 -Restart — перезапустить
-#   .\start-background.ps1 -Stop    — остановить
+# Starts dictation as its own process: it lives on its own and does not depend
+# on the window it was launched from.
+#   .\start-background.ps1          — start (does nothing if already running)
+#   .\start-background.ps1 -Restart — restart
+#   .\start-background.ps1 -Stop    — stop
 param([switch]$Restart, [switch]$Stop)
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -22,20 +22,20 @@ $running = @(Get-Dictation)
 if ($Stop -or $Restart) {
     foreach ($p in $running) {
         Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-        "остановил процесс $($p.ProcessId)"
+        "stopped process $($p.ProcessId)"
     }
-    if (-not $running) { "она и не работала" }
+    if (-not $running) { "it was not running" }
     if ($Stop) { return }
     Start-Sleep -Milliseconds 500
 } elseif ($running) {
-    "уже работает (процесс $($running[0].ProcessId)). Перезапустить: -Restart"
+    "already running (process $($running[0].ProcessId)). To restart: -Restart"
     return
 }
 
-if (-not (Test-Path $py)) { Write-Error "Нет окружения: $py"; exit 1 }
+if (-not (Test-Path $py)) { Write-Error "No environment at: $py"; exit 1 }
 
 $env:PYTHONUTF8 = "1"
-$env:HF_HUB_OFFLINE = "1"   # модели уже на диске, в сеть не ходим
+$env:HF_HUB_OFFLINE = "1"   # models are already on disk; stay off the network
 Start-Process -FilePath $py -ArgumentList "-u", "-m", "stt" `
     -WorkingDirectory $root -WindowStyle Hidden `
     -RedirectStandardOutput $out -RedirectStandardError $err | Out-Null
@@ -43,11 +43,11 @@ Start-Process -FilePath $py -ArgumentList "-u", "-m", "stt" `
 Start-Sleep -Seconds 3
 $now = @(Get-Dictation)
 if ($now) {
-    "запустил, процесс $($now[0].ProcessId)"
-    "журнал: $out"
-    "страница: http://127.0.0.1:8756/"
-    "Модель грузится ~2 секунды. F13 заработает сразу после этого."
+    "started, process $($now[0].ProcessId)"
+    "log: $out"
+    "page: http://127.0.0.1:8756/"
+    "The model loads in ~2 seconds. F13 works right after that."
 } else {
-    Write-Error "не поднялась — смотри $err"
+    Write-Error "it did not start — see $err"
     if (Test-Path $err) { Get-Content $err -Tail 15 }
 }

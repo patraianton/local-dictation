@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Полная проверка вариантов настройки на всей истории Антона.
+"""Full evaluation of setting variants over the whole history.
 
-За образец берём текст ElevenLabs (за него он платит и им пользуется).
-Это не идеальная истина, но сильная опора: большая разница = реальная разница.
-
-    ..\\.venv\\Scripts\\python.exe eval.py [сколько_записей]
+The ElevenLabs text is used as the reference (a paid service, used in anger).
+It is not perfect truth, but a strong anchor: a large difference is a real
+difference.
 """
 import json
 import re

@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Причёсывание текста локальной моделью через LM Studio.
+"""Tidying the text with a local model through LM Studio.
 
-Правило номер один: если что-то пошло не так — молча отдаём сырое распознавание.
-Диктовка не должна ломаться из-за второй ступени.
+Rule number one: if anything goes wrong, quietly return the raw recognition.
+Dictation must never break because of the second stage.
+
+The system prompts below are deliberately written in Russian: they instruct the
+model about Russian text, and every measurement in this project was made with
+them as they are. Translating them would invalidate all of it.
 """
 import difflib
 import re
@@ -12,13 +16,13 @@ import httpx
 
 from . import endings
 
-# Разбивка на слова с сохранением всего, что между ними (пробелы, знаки).
+# Split into words, keeping everything in between (spaces, punctuation).
 SPLIT_RE = re.compile(r"([^\W_]+)", re.UNICODE)
 SENT_END = re.compile(r"[.!?…]['\"»)\s]*$")
 CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE | re.UNICODE)
 
-# Грубая транслитерация — нужна только чтобы сравнить, похоже ли услышанное
-# кириллицей на термин латиницей.
+# Rough transliteration, used only to compare whether something written in
+# Cyrillic by ear sounds like a Latin-script term.
 _TRANSLIT = {
     "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
     "ж": "j", "з": "z", "и": "i", "й": "i", "к": "k", "л": "l", "м": "m",
@@ -33,9 +37,9 @@ def translit(text: str) -> str:
 
 
 def sounds_like(said: str, term: str, threshold: float = 0.55) -> bool:
-    """Похоже ли услышанное на термин по звучанию.
+    """Does what was heard sound like the term.
 
-    «акме паса» -> «AcmePass» похоже, «Mailwing» -> «Mailflow» нет.
+    "акме паса" -> "AcmePass" is close enough; "Mailwing" -> "Mailflow" is not.
     """
     a = re.sub(r"\W", "", translit(said))
     b = re.sub(r"\W", "", term.lower())
@@ -103,7 +107,7 @@ def _strip_think(text: str) -> str:
     text = THINK_RE.sub("", text)
     if "</think>" in text.lower():
         text = OPEN_THINK_RE.sub("", text)
-    # Модели без режима размышления просто переписывают служебное слово в ответ.
+    # Models without a thinking mode simply echo the control word back.
     return NOTHINK_RE.sub("", text).strip()
 
 
@@ -117,14 +121,15 @@ def _strip_wrapping(text: str) -> str:
 def constrain(
     raw: str, polished: str, allowed: set[str], protected: set[str] | None = None
 ) -> str:
-    """Замок на корректора.
+    """The lock on the corrector.
 
-    Берём от него только знаки препинания, заглавные буквы и подмену слов на
-    термины из словаря. Всё остальное — свои слова, чужие выражения, «улучшенная»
-    грамматика — откатываем к тому, что было сказано.
+    Only three things are taken from it: punctuation, capital letters and
+    replacing a word with a glossary term. Everything else — reworded phrases,
+    somebody else's expressions, "improved" grammar — is rolled back to what was
+    actually said.
 
-    allowed — слова, на которые МОЖНО заменять (термины из glossary.txt и
-    правые части fixes.tsv), в нижнем регистре.
+    allowed — the words it MAY substitute in (glossary.txt terms and the right
+    column of fixes.tsv), lowercase.
     """
     raw_parts = SPLIT_RE.split(raw)
     pol_parts = SPLIT_RE.split(polished)
@@ -136,10 +141,10 @@ def constrain(
         return raw
 
     def ok(words: list[str], said_words: list[str] | None = None) -> bool:
-        """Можно ли принять эту подмену от корректора."""
-        # Отдельно разрешаем одно: вернуть глаголу форму приказа.
-        # «Сделаю session handover» -> «Сделай session handover». Только это,
-        # только одно слово на одно и только по списку известных пар.
+        """May this substitution from the corrector be accepted."""
+        # One thing is allowed on its own: restoring the imperative form of
+        # a verb. "Сделаю session handover" -> "Сделай session handover". Only
+        # that, only one word for one, and only from the known pair list.
         if (
             said_words
             and len(words) == 1
@@ -149,16 +154,16 @@ def constrain(
             return True
         if not words or not all(w.lower() in allowed for w in words):
             return False
-        if said_words is None:  # дописал с нуля — только если это термин
+        if said_words is None:  # added from nothing: only if it is a term
             return True
         said = " ".join(said_words)
-        # Подменять разрешаем только то, что распознавалка записала кириллицей
-        # на слух. Иначе корректор меняет один термин из словаря на другой
-        # («Mailwing» -> «Mailflow») — этого он делать не должен.
+        # Substitution is allowed only for what the recognizer wrote in
+        # Cyrillic by ear. Otherwise the corrector swaps one glossary term for
+        # another ("Mailwing" -> "Mailflow"), which it must never do.
         if not CYRILLIC_RE.search(said):
             return False
-        # Слова, которые он реально говорит по-русски, не переводим:
-        # «сессию» остаётся «сессию», а не становится «session».
+        # Words the speaker genuinely says in their own language are not
+        # translated: "сессию" stays "сессию" and never becomes "session".
         if protected and any(w.lower() in protected for w in said_words):
             return False
         return sounds_like(said, " ".join(words))
@@ -168,20 +173,23 @@ def constrain(
     def put(
         word: str, j: int, said: str | None = None, raw_sep: str | None = None
     ) -> None:
-        """Кладём слово, разделитель берём из причёсанного текста.
+        """Emit a word; the separator comes from the corrected text.
 
-        said — как это слово прозвучало. Если корректор поменял только регистр
-        и это не начало предложения и не термин — оставляем как было сказано.
-        raw_sep — разделитель из сырого текста; берём его, если там был знак
-        (точка в «github.exe» иначе теряется, когда слово возвращаем обратно).
+        said — how the word was actually spoken. If the corrector changed only
+        the case, and this is neither a sentence start nor a term, keep it as
+        spoken.
+        raw_sep — the separator from the raw text; used when it carried
+        punctuation (the dot in "github.exe" is otherwise lost when the word is
+        put back).
         """
         if not out:
             sep = pol_parts[0]
             out.append(sep)
         else:
-            # Разделитель есть только ПЕРЕД существующим словом. Если j уехал
-            # за последнее слово, pol_parts[idx] — это хвост фразы (точка), и
-            # ставить его как разделитель нельзя: выйдет «отчёты.делать».
+            # A separator exists only BEFORE an existing word. If j ran past
+            # the last word, pol_parts[idx] is the tail of the phrase (a full
+            # stop) and must not be used as a separator: the result would be
+            # "отчёты.делать".
             idx = 2 * j
             sep = pol_parts[idx] if 0 < idx < 2 * len(pol_words) else " "
             if raw_sep and raw_sep.strip():
@@ -201,9 +209,9 @@ def constrain(
             word = said
         out.append(word)
 
-    # «ё» против «е» — это не другое слово, а другое написание. Если считать
-    # это заменой, разница склеивает соседние слова в один кусок и настоящая
-    # подмена термина рядом с ней перестаёт проходить.
+    # "ё" versus "е" is a different spelling, not a different word. Treating
+    # it as a substitution glues neighbouring words into one chunk, and a real
+    # term substitution next to it stops going through.
     def key(w: str) -> str:
         return w.lower().replace("ё", "е")
 
@@ -223,11 +231,12 @@ def constrain(
                 for k, i in enumerate(range(i1, i2)):
                     put(raw_words[i], j1 + k, raw_sep=raw_parts[2 * i])
         elif tag == "delete":
-            # Корректор выкинул слово — возвращаем: это его речь, не наша.
+            # The corrector dropped a word: put it back. It is the speaker's
+            # speech, not ours.
             for k, i in enumerate(range(i1, i2)):
                 put(raw_words[i], j1 + k, raw_sep=raw_parts[2 * i])
         elif tag == "insert":
-            # Дописал от себя — берём, только если это термин из словаря.
+            # Added on its own initiative: accept only if it is a glossary term.
             if ok(pol_words[j1:j2]):
                 for j in range(j1, j2):
                     put(pol_words[j], j)
@@ -238,14 +247,14 @@ def constrain(
 
 
 def flip_question(text: str) -> tuple[str, int, str]:
-    """Меняет знак в конце: точка <-> вопрос.
+    """Flips the final mark: full stop <-> question mark.
 
-    Отдаёт: новый текст, сколько знаков стереть в уже вставленном тексте,
-    что вместо них набрать.
+    Returns: the new text, how many characters to erase in the already-pasted
+    text, and what to type instead.
 
-    Нужно потому, что «Скоро это уже закончится» и «Скоро это уже закончится?» —
-    одни и те же слова: отличить их можно только по голосу, а по голосу вопрос
-    не ловится (замер 14.08.2026 на 347 записях — 2 пойманных из 117).
+    Needed because "Скоро это уже закончится" and "Скоро это уже закончится?"
+    are the same words: only the voice tells them apart, and the voice does not
+    carry the signal (measured 2026-08-14 on 347 takes — 2 caught out of 117).
     """
     tail = text.rstrip()
     trail = text[len(tail):]
@@ -264,33 +273,34 @@ SENTENCE_RE = re.compile(r"[^.!?…]+[.!?…]*")
 
 
 def no_false_question(raw: str, text: str) -> str:
-    """Снимает «?» там, где вопроса быть не может или где он ничем не подкреплён.
+    """Removes a "?" where a question is impossible or simply unsupported.
 
-    Три причины снять знак:
+    Three reasons to drop the mark:
 
-    1. Это поручение: «Ты мне скажи, какие журналы ты читал?» — глагол-приказ
-       стоит раньше вопросительного слова. Знак вопроса на поручении заставляет
-       агента переспрашивать вместо того, чтобы делать.
-    2. Это хвост прошлой мысли: «Чтобы я мог спотчекнуть, как они выглядят?».
-    3. Знак придумал корректор, а зацепиться не за что: распознавалка вопроса
-       не услышала И вопросительного слова в тексте нет.
+    1. It is an order: "Ты мне скажи, какие журналы ты читал?" — the imperative
+       verb stands earlier than the question word. A question mark on an order
+       makes an agent ask back instead of doing the work.
+    2. It is the tail of a previous thought: "Чтобы я мог спотчекнуть, как они
+       выглядят?".
+    3. The corrector invented the mark with nothing to go on: the recognizer did
+       not hear a question AND there is no question word in the text.
 
-    Третье правило — самое ценное. Замер на 93 репликах с чужой разметкой
-    (эталон ElevenLabs, 43 вопроса), 15.08.2026:
+    The third rule is the valuable one. Measured on 93 single-sentence takes
+    against an independent reference (ElevenLabs, 43 questions), 2026-08-15:
 
-        только распознавалка     33 из 43, лишних 1  (точность 97%)
-        корректор как есть       41 из 43, лишних 7  (точность 85%)
-        + правила 1 и 2          37 из 43, лишних 3  (точность 92%)
-        + правило 3             *36 из 43, лишних 1  (точность 97%)
+        recognizer alone        33 of 43, 1 false  (precision 97%)
+        corrector unrestricted  41 of 43, 7 false  (precision 85%)
+        + rules 1 and 2         37 of 43, 3 false  (precision 92%)
+        + rule 3               *36 of 43, 1 false  (precision 97%)
 
-    То есть третье правило стоит одного пойманного вопроса и убирает два лишних
-    знака. Выбрано осознанно: лишний знак Антон замечает и злится, пропущенный —
-    почти нет. Собственному знаку распознавалки верим: он редко ошибается.
+    So the third rule costs one caught question and removes two false marks.
+    Chosen deliberately: a false mark is noticed and resented, a missing one
+    almost never is. The recognizer's own mark is trusted: it rarely errs.
     """
     if "?" not in text:
         return text
-    # Знак от распознавалки смотрим по всей реплике: корректор может слепить или
-    # разбить предложения, и сопоставить их по одному надёжно не выйдет.
+    # The recognizer's mark is checked across the whole take: the corrector may
+    # merge or split sentences, so matching them one to one is not reliable.
     heard_question = "?" in (raw or "")
     out = []
     for sentence in SENTENCE_RE.findall(text):
@@ -306,7 +316,7 @@ def no_false_question(raw: str, text: str) -> str:
 
 
 def allowed_words(terms: list[str], fixes=None) -> set[str]:
-    """Слова, на которые корректору МОЖНО подменять сказанное."""
+    """Words the corrector MAY substitute for what was said."""
     out: set[str] = set()
     for term in terms:
         out.update(w.lower() for w in SPLIT_RE.findall(term))
@@ -331,8 +341,8 @@ class Polisher:
         self.allowed = allowed_words(terms, fixes)
         self.protected = protected or set()
         self.available = False
-        self.reason = "не проверялось"
-        self._next_check = 0.0  # не долбимся в мёртвый LM Studio на каждой фразе
+        self.reason = "not checked yet"
+        self._next_check = 0.0  # do not hammer a dead LM Studio on every take
         self._client = httpx.Client(timeout=self.timeout)
 
     @property
@@ -343,9 +353,9 @@ class Polisher:
         return base + "\n\nСписок названий и терминов:\n" + ", ".join(self.terms[:150])
 
     def check(self, force: bool = False) -> bool:
-        """Есть ли живой LM Studio с загруженной моделью."""
+        """Is there a live LM Studio with a model loaded."""
         if not self.enabled:
-            self.available, self.reason = False, "выключено в настройках"
+            self.available, self.reason = False, "disabled in the settings"
             return False
         if not force and time.time() < self._next_check:
             return False
@@ -357,23 +367,23 @@ class Polisher:
             chat_ids = [i for i in ids if "embed" not in i.lower()]
             if not chat_ids:
                 self.available = False
-                self.reason = "в LM Studio нет загруженной чат-модели"
+                self.reason = "LM Studio has no chat model loaded"
                 return False
             if not self.model or self.model not in chat_ids:
                 self.model = chat_ids[0]
-            self.available, self.reason = True, "ок"
+            self.available, self.reason = True, "ok"
             self._next_check = 0.0
             return True
         except Exception as exc:
             self.available = False
-            self.reason = f"LM Studio не отвечает ({type(exc).__name__})"
+            self.reason = f"LM Studio is not answering ({type(exc).__name__})"
             return False
 
     def list_models(self) -> tuple[list[str], str]:
-        """(какие модели видит LM Studio, почему не видит ничего).
+        """(models LM Studio can see, or why it sees none).
 
-        Нужно панели: человек выбирает корректора из того, что у него загружено,
-        не лазая в config.toml.
+        Used by the page: the user picks a corrector from what is actually
+        loaded, without editing config.toml.
         """
         try:
             r = self._client.get(f"{self.base}/v1/models", timeout=2.0)
@@ -387,7 +397,7 @@ class Polisher:
             return [], f"LM Studio is not answering ({type(exc).__name__})"
 
     def use_model(self, name: str) -> bool:
-        """Переключает корректора на другую модель прямо на ходу."""
+        """Switches the corrector to another model on the fly."""
         available, _why = self.list_models()
         if name not in available:
             return False
@@ -398,7 +408,7 @@ class Polisher:
         return True
 
     def ask(self, prompt: str, max_tokens: int = 8, timeout: float = 6.0) -> str:
-        """Короткий вопрос модели с коротким ответом. Для одного решения."""
+        """A short question to the model with a short answer. One decision."""
         r = self._client.post(
             f"{self.base}/v1/chat/completions",
             json={
@@ -416,10 +426,10 @@ class Polisher:
         return _strip_think(r.json()["choices"][0]["message"]["content"])
 
     def warmup(self) -> float:
-        """Гоняем пустышку, чтобы LM Studio подняла модель в видеопамять заранее.
+        """Sends a dummy request so LM Studio loads the model into VRAM early.
 
-        Без этого ПЕРВАЯ диктовка ждёт загрузку модели — на замере вышло 3 секунды
-        против обычных 0,3.
+        Without it the FIRST take waits for the model to load — measured at 3
+        seconds against the usual 0.3.
         """
         if not self.available:
             return 0.0
@@ -442,15 +452,15 @@ class Polisher:
         return time.perf_counter() - t0
 
     def polish(self, raw: str) -> tuple[str, float, str]:
-        """(текст, секунды, что произошло). При любой заминке возвращает raw."""
+        """(text, seconds, what happened). Returns raw on any hiccup."""
         if not raw.strip():
-            return raw, 0.0, "пусто"
+            return raw, 0.0, "empty"
         if not self.enabled:
-            return raw, 0.0, "выключено"
-        # На коротких фразах корректор ничего полезного не добавляет, а понести
-        # его может: на «Проверь ещё раз» он выдал ответ в десять раз длиннее.
+            return raw, 0.0, "disabled"
+        # On short phrases the corrector used to be skipped entirely — see
+        # config.toml, [polish] min_words, for why that turned out to be wrong.
         if len(raw.split()) < self.min_words:
-            return raw, 0.0, "коротко, без корректора"
+            return raw, 0.0, "too short, skipped"
         if not self.available and not self.check():
             return raw, 0.0, self.reason
 
@@ -464,11 +474,11 @@ class Polisher:
             "temperature": 0.0,
             "max_tokens": min(1200, int(len(raw) / 2) + 100),
             "stream": False,
-            # Правильный способ отключить «размышления вслух» у моделей, которые
-            # это умеют. Те, что не умеют, поле просто игнорируют.
+            # The proper way to switch off "thinking out loud" in models that
+            # support it. Models that do not simply ignore the field.
             "chat_template_kwargs": {"enable_thinking": False},
-            # Просим LM Studio не выгружать модель из видеопамяти сразу:
-            # иначе первая диктовка после перерыва ждёт загрузку 2 секунды.
+            # Ask LM Studio not to unload the model from VRAM immediately:
+            # otherwise the first take after a pause waits 2 seconds for it.
             "ttl": self.keep_loaded_s,
         }
         try:
@@ -480,18 +490,18 @@ class Polisher:
         except Exception as exc:
             self.available = False
             self.reason = f"{type(exc).__name__}"
-            return raw, time.perf_counter() - t0, f"сбой: {self.reason}"
+            return raw, time.perf_counter() - t0, f"failed: {self.reason}"
 
         took = time.perf_counter() - t0
         text = _strip_wrapping(_strip_think(out))
         if not text:
-            return raw, took, "модель вернула пустоту"
+            return raw, took, "the model returned nothing"
         ratio = len(text) / max(1, len(raw))
         if ratio > self.max_growth or ratio < 1.0 / self.max_growth:
-            return raw, took, f"модель поехала (длина x{ratio:.2f})"
+            return raw, took, f"the model ran off (length x{ratio:.2f})"
         if self.mode != "clean":
-            # Замок: оставляем от корректора только знаки, заглавные и термины.
+            # The lock: keep only punctuation, capitals and terms.
             fixed = constrain(raw, text, self.allowed, self.protected)
-            note = "ок" if fixed == text else "ок, лишнее откатил"
+            note = "ok" if fixed == text else "ok, rolled back extras"
             return fixed, took, note
-        return text, took, "ок"
+        return text, took, "ok"

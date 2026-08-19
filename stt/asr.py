@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Распознавание речи: faster-whisper на видеокарте."""
+"""Speech recognition: faster-whisper on the GPU."""
 import re
 import time
 
@@ -15,22 +15,23 @@ PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 
 
 def build_prompt(terms: list[str], limit: int, style: str = "sample") -> str:
-    """Подсказка распознавалке.
+    """The hint given to the recognizer.
 
-    Она делает две вещи сразу: учит модель твоим словам И задаёт стиль записи —
-    с заглавными буквами и знаками препинания. Без подсказки текст выходит
-    сплошной строчной кашей.
+    It does two things at once: teaches the model your words AND sets the
+    writing style — capitals and punctuation. Without a hint the output is one
+    long lowercase blur.
     """
     picked = [t for t in terms[:limit] if t]
     if not picked:
         return ""
     if style == "commands":
-        # Приказы в подсказке — против самой вредной ошибки: распознавалка слышит
-        # «сделай» как «сделаю» и переворачивает смысл на противоположный.
-        # Замерено на 383 записях: без приказов 4 потерянных приказа при 17,0%
-        # ошибок, с этими глаголами 2 при 17,4%. Вариант с целыми фразами давал
-        # 1 потерянный, но 18,2% — содержательные слова из подсказки начинали
-        # всплывать в тексте. Поэтому здесь только глаголы, без существительных.
+        # Imperative verbs in the hint fight the most damaging error there is:
+        # the recognizer hears "сделай" (do it) as "сделаю" (I will do it) and
+        # inverts the meaning. Measured on 383 takes: without them, 4 orders
+        # lost at 17.0% word error; with these verbs, 2 lost at 17.4%. A variant
+        # using whole sentences lost only 1 but scored 18.2% — content words
+        # from the hint started leaking into the transcript. Hence verbs only,
+        # no nouns.
         return (
             "Сделай, проверь, посмотри, запусти, запускай, отправляй, продолжай, "
             "отгружай, собери, поставь, обнови, покажи, найди, добавь, открой. "
@@ -38,8 +39,8 @@ def build_prompt(terms: list[str], limit: int, style: str = "sample") -> str:
         )
     if style == "list":
         return "Термины и названия: " + ", ".join(picked) + "."
-    # Живая фраза в его стиле работает лучше сухого списка: модель копирует
-    # не только слова, но и оформление.
+    # A natural sentence in the speaker's own style beats a dry list: the model
+    # copies not just the words but the formatting too.
     return (
         "Окей, смотри: закинь этот worktree в Claude Code, поставь loop на пять часов, "
         "потом глянь Intercom и Mailflow, и обнови дашборд в PostHog. "
@@ -49,10 +50,10 @@ def build_prompt(terms: list[str], limit: int, style: str = "sample") -> str:
 
 
 def looped(text: str, times: int = 4) -> bool:
-    """Признак срыва в повтор: одна тройка слов повторяется снова и снова.
+    """Detects a decoding loop: the same word triple repeating over and over.
 
-    Настоящий сбой распознавалки — она уходит в «Харьков, Мори, Харьков, Мори…»
-    и выдаёт мусор на пол-экрана.
+    A real failure mode of the recognizer — it slides into
+    "Харьков, Мори, Харьков, Мори..." and fills half the screen with garbage.
     """
     words = PUNCT_RE.sub(" ", text.lower()).split()
     if len(words) < times * 3:
@@ -82,8 +83,9 @@ class Asr:
 
     def load(self) -> float:
         t0 = time.perf_counter()
-        # Сначала пробуем взять модель с диска и вообще не ходить в сеть:
-        # так запуск не зависит от интернета и не ждёт проверки версии.
+        # Try the on-disk copy first and stay off the network entirely: that
+        # way startup does not depend on the internet or wait for a version
+        # check.
         for local_only in (True, False):
             try:
                 self.model = WhisperModel(
@@ -95,13 +97,13 @@ class Asr:
                 return time.perf_counter() - t0
             except Exception:
                 continue
-        # Видеокарта недоступна — работаем на процессоре, лишь бы не молчать.
+        # No GPU available — run on the CPU rather than not run at all.
         self.device, self.compute_type = "cpu", "int8"
         self.model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
         return time.perf_counter() - t0
 
     def warmup(self) -> float:
-        """Первый прогон всегда медленный — делаем его заранее, на тишине."""
+        """The first run is always slow — get it over with, on silence."""
         t0 = time.perf_counter()
         self.transcribe(np.zeros(16000, dtype=np.float32))
         return time.perf_counter() - t0
@@ -111,8 +113,9 @@ class Asr:
             audio,
             language=self.language,
             beam_size=self.beam_size,
-            # Список температур = право отступить: если вышла бессмыслица
-            # (слишком сжатый или невероятный текст), модель переспрашивает сама.
+            # A list of temperatures gives the model a way out: if the
+            # result looks like nonsense (over-compressed or improbable text)
+            # it retries on its own.
             temperature=[0.0, 0.2, 0.4, 0.6],
             compression_ratio_threshold=2.4,
             repetition_penalty=1.15,
@@ -124,9 +127,9 @@ class Asr:
         )
         return " ".join(seg.text.strip() for seg in segments).strip()
 
-    # Признаки того, что видеокарта отвалилась и модель в памяти больше не жива.
-    # Случается после сна компьютера: 19.08.2026 программа так провисела четыре
-    # дня, отвечая «СБОЙ» на каждую диктовку, пока её не перезапустили руками.
+    # Marks of a GPU that fell away, leaving the in-memory model dead.
+    # Happens after the machine sleeps: on 2026-08-19 the app hung like this for
+    # four days, answering "FAILED" to every take until restarted by hand.
     LOST_GPU = ("cuda", "cudnn", "cublas", "gpu", "device-side", "out of memory")
 
     @classmethod
@@ -135,10 +138,10 @@ class Asr:
         return any(mark in text for mark in cls.LOST_GPU)
 
     def reload(self) -> str:
-        """Поднимает модель заново после потери видеокарты.
+        """Brings the model back after the GPU was lost.
 
-        Сначала пробуем ту же видеокарту — обычно контекст просто надо создать
-        заново. Не вышло — переходим на процессор: медленнее, но диктовка живая.
+        Tries the same GPU first — usually the context just needs recreating.
+        If that fails, falls back to the CPU: slower, but dictation stays alive.
         """
         self.model = None
         try:
@@ -152,10 +155,10 @@ class Asr:
 
     def transcribe(self, audio: np.ndarray) -> tuple[str, float]:
         if self.model is None:
-            raise RuntimeError("модель не загружена")
+            raise RuntimeError("model is not loaded")
         t0 = time.perf_counter()
         text = self._run(audio, self.prompt)
-        # Сорвалась в повтор — почти всегда виновата подсказка. Пробуем без неё.
+        # Looped: almost always the hint is to blame. Retry without it.
         if looped(text):
             text = self._run(audio, None)
         return text, time.perf_counter() - t0

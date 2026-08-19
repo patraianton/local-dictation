@@ -1,97 +1,101 @@
-# Настройки диктовки. Правь этот файл и перезапускай программу.
+# Dictation settings. Edit this file and restart the app.
 
 [hotkey]
-# Имя клавиши. Если распознаётся плохо — узнай скан-код командой `run.ps1 keytest`
-# и впиши его числом в scancode (тогда name игнорируется).
+# Key name. If it is not picked up, find its scan code with `run.ps1 keytest`
+# and put the number in scancode (then name is ignored).
 name = "f13"
 scancode = 0
-# Клавиша «не то»: открывает окошко с последней диктовкой, правишь слово — запомнит навсегда.
+# The "that's wrong" key: opens the last take; fix a word and it is remembered forever.
 fix_hotkey = "shift+f13"
-# Клавиша «это был вопрос»: меняет знак в конце последней диктовки, точка <-> «?»,
-# и правит уже вставленный текст. Нажимать сразу после диктовки, пока курсор
-# стоит за текстом. Вопрос от утверждения отличается только голосом, а по голосу
-# он не ловится (замер 14.08.2026: 2 из 117) — поэтому решаешь ты, одной кнопкой.
-# Не нужна — поставь "".
+# The "that was a question" key: flips the final mark of the last take
+# between "." and "?", and fixes the text you already pasted. Press it right
+# after dictating, while the cursor still sits after the text. A question and a
+# statement differ only by voice, and the voice carries no usable signal
+# (measured 2026-08-14: 2 caught out of 117) — so you decide, with one key.
+# Set to "" if you do not want it.
 flip_hotkey = "ctrl+f13"
-# Короткое нажатие (меньше этого) = запись без рук, идёт до следующего нажатия.
-# Долгое (зажал и держишь) = пишет, пока держишь.
+# A tap shorter than this = hands-free recording until the next press.
+# Holding the key = records while held.
 tap_ms = 350
-# Страховка: сколько секунд максимум писать, если забыл выключить.
+# Safety net: the maximum number of seconds to record if you forget to stop.
 max_seconds = 300
 
 [mic]
-# Часть названия микрофона. Пусто = микрофон Windows по умолчанию.
+# Part of the microphone name. Empty = the Windows default microphone.
 name = "PodMic"
 samplerate = 16000
-# Сколько дописывать ПОСЛЕ отпускания клавиши. Клавишу отпускают, ещё договаривая
-# последнее слово, и оно пропадало: замер 15.08.2026 показал, что 47% записей
-# обрывались на звуке, без единого тихого кадра в конце.
-# Ждём не всегда до упора: как только пошла тишина — останавливаемся. Если ты
-# отпустил уже в паузе, задержки почти нет.
+# How long to keep recording AFTER the key is released. People release the key
+# while still finishing the last word, and that word was being lost: a
+# measurement on 2026-08-15 found 47% of takes cut off mid-sound, without a
+# single quiet frame at the end.
+# It does not always wait the full time: as soon as silence starts, it stops.
+# Release during a pause and the delay is almost nothing.
 tail_ms = 400
-# Сколько миллисекунд тишины подряд считать концом фразы.
+# How many milliseconds of continuous silence count as the end of a phrase.
 tail_quiet_ms = 120
 
 [asr]
-# large-v3-turbo: на твоём голосе оказалась и быстрее в 4 раза, и точнее, чем large-v3.
-# Если захочешь сравнить — впиши "large-v3".
+# large-v3-turbo: on this voice it was both 4x faster and more accurate than
+# large-v3. Put "large-v3" here if you want to compare.
 model = "large-v3-turbo"
 device = "cuda"
 compute_type = "float16"
 language = "ru"
-# Широкий поиск. У turbo он стоит одну сотую секунды, а ошибок даёт меньше:
-# на твоих 377 записях 17,0% против 17,8%. Поставь 1, если захочешь ещё быстрее.
+# A wider beam. On turbo it costs a hundredth of a second and makes fewer
+# errors: 17.0% against 17.8% on 377 real takes. Set 1 if you want it faster.
 beam_size = 5
 vad = true
-# Сколько терминов из словаря подсовывать распознавалке заранее (больше 60 она не переварит).
+# How many glossary terms to feed the recognizer up front (it chokes above 60).
 prompt_terms = 45
-# "commands" — глаголы-приказы + термины. Вдвое реже переворачивает смысл
-#              («сделай» -> «сделаю»), общая точность ниже на 0,4%.
-# "list"     — только термины. Точнее в среднем, но чаще ломает приказы.
-# "sample"   — живая фраза с терминами.
+# "commands" — imperative verbs + terms. Inverts the meaning half as often
+#              ("do it" -> "I will do it"), overall accuracy 0.4% lower.
+# "list"     — terms only. More accurate on average, breaks orders more often.
+# "sample"   — a natural sentence containing the terms.
 prompt_style = "commands"
 
 [polish]
-# Причёсывание текста второй моделью через LM Studio.
+# Tidying the text with a second model through LM Studio.
 enabled = true
 url = "http://127.0.0.1:1234"
-# Проверено на твоих записях: 0,35 с на реплику, держит 18 ГБ видеопамяти
-# (у неё из 30 миллиардов работают только 3, поэтому она быстрая).
-# Вопросительные знаки возвращает заметно лучше маленькой: 6 из 7 против 4 из 7,
-# ценой одного лишнего знака на 7 утверждений.
-# Полегче и побезопаснее — "qwen3-4b-instruct-2507": 3 ГБ, та же скорость,
-# ни одного лишнего знака, но и вопросов ловит меньше.
-# Пусто = брать ту модель, что сейчас загружена в LM Studio. Это удобно, когда
-# модель меняешь: включил новую — диктовка подхватит её сама.
-# Хочешь закрепить конкретную — выбери её на вкладке Model на странице,
-# имя запишется сюда само.
+# Measured on real takes: 0.35 s per line, holds 18 GB of VRAM (only 3 of its
+# 30 billion parameters are active at a time, which is why it is fast).
+# It restores question marks noticeably better than a small model: 6 of 7
+# against 4 of 7, at the cost of one false mark per 7 statements.
+# Lighter and safer: "qwen3-4b-instruct-2507" — 3 GB, same speed, no false
+# marks at all, but it catches fewer questions.
+# Empty = use whatever model is currently loaded in LM Studio. Handy while you
+# are switching models: load a new one and dictation picks it up by itself.
+# To pin a specific one, choose it on the Model tab of the page; the name is
+# written here automatically.
 model = ""
-# "light"  — только знаки препинания, заглавные и термины. Твои слова не трогает.
-# "clean"  — плюс убирает «ээ», повторы и оговорки. Текст глаже, но это уже правка речи.
+# "light"  — punctuation, capitals and terms only. Your words are untouched.
+# "clean"  — also removes fillers, repeats and slips. Smoother text, but that is
+#            editing your speech.
 mode = "light"
 timeout_s = 4.0
-# Фразы короче этого числа слов корректору не отдаём. Стояло 4 — из-за этого
-# каждая четырнадцатая диктовка («Что странно.», «Когда можно будет.») оставалась
-# без вопросительного знака и без заглавной буквы. Прогнали все 34 такие фразы
-# через корректор: починил ровно эти три случая, остальные 30 не тронул, цена
-# 78 мс. Старый страх «на коротком корректор понесёт» закрыт замком в
-# polish.py::constrain — он всё лишнее откатывает.
+# Phrases shorter than this many words are not sent to the corrector. It used
+# to be 4, and because of that every fourteenth take ("Что странно.", "Когда
+# можно будет.") came out with no question mark and no capital letter. All 34
+# such phrases were run through the corrector: it fixed exactly those cases,
+# left the other 30 alone, and cost 78 ms. The old fear that the corrector runs
+# wild on short input is handled by the lock in polish.py::constrain, which
+# rolls back anything extra.
 min_words = 1
-# Сколько секунд LM Studio держит модель в видеопамяти после последнего запроса.
-# Иначе первая диктовка после перерыва ждёт загрузку ~2 секунды.
+# How many seconds LM Studio keeps the model in VRAM after the last request.
+# Otherwise the first take after a break waits ~2 seconds for it to load.
 keep_loaded_s = 3600
-# Если результат отличается по длине больше чем во столько раз — модель «поехала»,
-# вставляем сырое распознавание.
+# If the result differs in length by more than this factor, the model has run
+# off the rails and the raw recognition is used instead.
 max_growth = 1.6
 
 [duck]
-# Приглушать чужой звук, пока идёт запись: зажал клавишу — YouTube и музыка
-# становятся тихими, отпустил — вернулись как были. Своей громкости не касаемся.
+# Duck other applications while recording: hold the key and YouTube and music
+# go quiet, release it and they come back. Our own volume is never touched.
 enabled = true
-# До какой доли громкости опускать. 0.15 = 15%, слышно фоном, но говорить не мешает.
-# 0.0 = полная тишина.
+# What fraction of the volume to drop to. 0.15 = 15%: audible in the
+# background but not in the way. 0.0 = complete silence.
 level = 0.15
-# Кого НЕ трогать. Имена процессов как в диспетчере задач, например ["Zoom.exe"].
+# Who NOT to touch. Process names as in Task Manager, e.g. ["Zoom.exe"].
 exclude = []
 
 [paste]
@@ -100,42 +104,42 @@ restore_clipboard_after_s = 1.0
 
 [learn]
 enabled = true
-# Сколько раз модель должна починить одно и то же слово, чтобы оно попало в словарь навсегда.
+# How many times the model must fix the same word before it is kept forever.
 promote_after = 2
-# Хранить звук — нужен для будущего дообучения распознавалки на твоём голосе.
+# Keep the audio — needed to fine-tune the recognizer on your voice later.
 keep_audio = true
 
 [endings]
-# Приказ против обещания: «сделай» и «сделаю».
+# An order versus a promise: "do it" and "I will do it".
 #
-# Основную работу делает корректор — он видит смысл предложения, а замок
-# пропускает от него ТОЛЬКО переключение формы глагола из списка в
-# stt/endings.py. Это работает всегда и настройки не требует.
+# The corrector does the real work here — it sees the meaning of the sentence,
+# and the lock lets through ONLY a verb-form flip from the list in
+# stt/endings.py. That always runs and needs no configuration.
 #
-# Ниже — слепое правило «по списку глаголов, без учёта смысла». На твоих 377
-# записях оно дало 10 срабатываний, из них 5 неверных («схожу и посмотрю» ->
-# «посмотри»). Поэтому по умолчанию выключено. Включай, только если корректор
-# не справляется и ты готов к ошибкам в другую сторону.
+# Below is the blind rule: "by verb list, ignoring meaning". On 377 real takes
+# it fired 10 times, 5 of them wrong ("I will go and see" -> "go and see").
+# Hence it is off by default. Turn it on only if the corrector is not coping and
+# you accept errors in the other direction.
 enabled = false
 
 [repaste]
-# «Вставить последнюю диктовку ещё раз» — когда текст улетел не в то окно.
-# Наводишь мышь на нужное окно, жмёшь кнопку — программа делает это окно
-# активным и вставляет туда последний текст.
+# "Paste the last take again" — for when the text went into the wrong window.
+# Point the mouse at the right window and press the button: the app brings it
+# forward and pastes the last text there.
 enabled = true
-# Кнопка Forward на G502 — средняя из трёх под большим пальцем.
-# Верхняя занята под F13 (диктовка), нижняя под «press to speak» — не трогаем.
+# The Forward button on a G502 — the middle of the three under the thumb.
+# The top one is F13 (dictation), the bottom one is push-to-talk: leave both.
 button = "x2"
-# Перехватывать кнопку, чтобы она не делала свою обычную работу
-# (у боковых это «назад/вперёд» в браузере). По умолчанию НЕ перехватываем:
-# пусть делает и то, и другое, так меньше сюрпризов.
+# Swallow the button so it does not also do its usual job (for the side
+# buttons that is back/forward in a browser). Off by default: let it do both,
+# there are fewer surprises that way.
 suppress = false
-# Запасной вариант с клавиатуры, если мышь не подходит. Пусто = не нужен.
+# A keyboard fallback if the mouse does not suit. Empty = not needed.
 key = ""
 
 [web]
-# Страница со всеми диктовками: посмотреть, скопировать, поправить, пометить.
-# Живёт только на этом компьютере, наружу не смотрит.
+# The page with every take: read, copy, fix, mark.
+# Lives on this machine only and does not face the outside world.
 enabled = true
 port = 8756
 open_on_start = false

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Учит Windows находить CUDA-библиотеки, которые лежат внутри venv.
+"""Teaches Windows where to find the CUDA libraries that live inside the venv.
 
-Без этого ctranslate2 падает с «Library cublas64_12.dll is not found».
-Импортировать ДО faster_whisper.
+Without this ctranslate2 dies with "Library cublas64_12.dll is not found".
+Import this BEFORE faster_whisper.
 """
 import os
 import sys

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Слышно ли вопрос по голосу: есть ли разница в высоте тона.
+"""Can a question be heard in the voice: is there a difference in pitch.
 
-Текстом вопрос «Мы заливаем статьи уже?» от утверждения не отличить — разница
-только в интонации. Проверяем на записях Антона, размеченных ElevenLabs:
-правда ли у вопросов голос в конце ведёт себя иначе.
+In text, "Мы заливаем статьи уже?" cannot be told from the statement — the only
+difference is intonation. Checked on real recordings labelled by ElevenLabs:
+is the voice really doing something different at the end of a question.
 
     ..\\.venv\\Scripts\\python.exe pitch.py
 """

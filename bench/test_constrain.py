@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Проверка замка: корректор не должен уметь переписывать слова Антона.
+"""Checks the lock: the corrector must not be able to rewrite the speaker.
 
     ..\\.venv\\Scripts\\python.exe test_constrain.py
 """
@@ -13,233 +13,233 @@ TERMS = ["AcmePass", "GitHub", "Claude Code", "Chrome Extension", "Supabase",
          "Intercom", "loop", "worktree", "Codex", "outbound"]
 ALLOWED = allowed_words(TERMS)
 
-# (что сказал, что вернул корректор, что должно получиться, зачем проверяем)
+# (what was said, what the corrector returned, what must come out, why)
 CASES = [
     (
         "И где лежит его доки?",
         "Где лежат его документы?",
         "И где лежит его доки?",
-        "слова не менять: доки != документы, лежит != лежат, «И» не выкидывать",
+        "do not change words, and do not drop the leading conjunction",
     ),
     (
         "Что за хуйня, только что 8 окон github.exe открылось.",
         "Что за хуёня, только что 8 окон GitHub.exe открылось.",
         "Что за хуйня, только что 8 окон GitHub.exe открылось.",
-        "мат не портить, но GitHub с большой буквы взять",
+        "keep the profanity intact, but take GitHub capitalized",
     ),
     (
         "Спланируй новых статей и ссылок на акме паса, причем на главную.",
         "Спланируй новые статьи и ссылки на AcmePass, причём на главную.",
         "Спланируй новых статей и ссылок на AcmePass, причём на главную.",
-        "термин подменить можно, грамматику править нельзя",
+        "a term may be substituted, grammar may not be edited",
     ),
     (
         "открой chrome extension я тебе открыл github сделай там себе токены",
         "Открой Chrome Extension, я тебе открыл GitHub. Сделай там себе токены.",
         "Открой Chrome Extension, я тебе открыл GitHub. Сделай там себе токены.",
-        "знаки препинания и заглавные — берём целиком",
+        "punctuation and capitals are taken wholesale",
     ),
     (
         "Сделай там себе токены и все что тебе надо.",
         "Сделай там себе токены и всё, что тебе нужно.",
         "Сделай там себе токены и всё, что тебе надо.",
-        "надо != нужно; ё вместо е — это тот же корень, оставляем корректору",
+        "synonyms are not accepted; the e/yo spelling is left to the corrector",
     ),
     (
         "Иди собери контекст, отправляя агентов по outbound репозиторию.",
         "Иди собери контекст, отправляя агентов по Outbound репозиторию — "
         "нам надо собрать хорошее ICP.",
         "Иди собери контекст, отправляя агентов по Outbound репозиторию.",
-        "дописанное от себя выкидываем",
+        "anything the model added on its own is dropped",
     ),
     (
         "Моя задача получить митинги для клиента для медмаркета компании.",
         "Моя задача — получить митинги для клиента, для China Cars marketplace компании.",
         "Моя задача — получить митинги для клиента, для медмаркета компании.",
-        "выдуманный термин не пропускаем",
+        "an invented term does not get through",
     ),
     (
         "давай.",
         "Давай.",
         "Давай.",
-        "короткая фраза не ломается",
+        "a short phrase does not break",
     ),
     (
         "Это для клейма Mailwing. Я его сейчас сам заполняю.",
         "Это для клейма Mailflow. Я его сейчас сам заполняю.",
         "Это для клейма Mailwing. Я его сейчас сам заполняю.",
-        "один термин из словаря не подменять другим",
+        "one glossary term must not be swapped for another",
     ),
     (
         "Мне не обязательно попадать в ту же сессию.",
         "Мне не обязательно попадать в ту же session.",
         "Мне не обязательно попадать в ту же сессию.",
-        "русское слово не переводить в термин",
+        "an ordinary word must not be translated into a term",
     ),
     (
         "только что 8 окон github.exe открылось",
         "Только что 8 окон GitHub открылось.",
         "Только что 8 окон GitHub.exe открылось.",
-        "возвращая выкинутое слово, не терять точку в github.exe",
+        "restoring a dropped word must not lose the dot in github.exe",
     ),
     (
         "Опять 20 окон гитхаба сейчас летает.",
         "Опять 20 окон GitHub сейчас летает.",
         "Опять 20 окон GitHub сейчас летает.",
-        "кириллица на слух -> термин латиницей: это разрешено",
+        "heard in Cyrillic -> a Latin-script term: this is allowed",
     ),
     (
         "Я хочу PostHog отчеты делать.",
         "Я хочу делать PostHog отчёты.",
         "Я хочу PostHog отчёты делать.",
-        "выкинутое последнее слово вернуть без точки посередине",
+        "a dropped last word comes back without a stray dot in the middle",
     ),
     (
         "Собери три штуки",
         "Собери три штуки.",
         "Собери три штуки.",
-        "точку в конце корректор дописать может",
+        "the corrector may add a full stop at the end",
     ),
     (
         "Чтобы я мог спотчекнуть, как они все выглядят.",
         "Чтобы я мог спотчекнуть, как они все выглядят?",
         "Чтобы я мог спотчекнуть, как они все выглядят.",
-        "«чтобы» начинает хвост прошлой мысли, а не вопрос — знак снимаем",
+        "a subordinate clause is the tail of a thought, not a question",
     ),
     (
         "Чтобы что.",
         "Чтобы что?",
         "Чтобы что?",
-        "короткий переспрос «Чтобы что?» — настоящий вопрос, знак оставляем",
+        "the short retort is a real question: the mark stays",
     ),
     (
         "Чтобы ты понял?",
         "Чтобы ты понял?",
         "Чтобы ты понял?",
-        "короткое «чтобы» не трогаем: переспросить так можно",
+        "a short subordinate clause is left alone: it can be a retort",
     ),
     (
         "Сделай мне CSV. Чтобы я мог посмотреть, что там вышло.",
         "Сделай мне CSV. Чтобы я мог посмотреть, что там вышло?",
         "Сделай мне CSV. Чтобы я мог посмотреть, что там вышло.",
-        "знак снимаем только со второго предложения, первое не трогаем",
+        "only the second sentence loses its mark; the first is untouched",
     ),
     (
         "Переводи их на ажур.",
         "Переводи их на ажур?",
         "Переводи их на ажур.",
-        "приказ узнаётся по разбору слова, даже если его нет в списке",
+        "an imperative is recognized by morphology, even if it is not in the list",
     ),
     (
         "Сноси эту ветку.",
         "Сноси эту ветку?",
         "Сноси эту ветку.",
-        "и другой приказ, которого в списке тоже нет",
+        "and another imperative that is also missing from the list",
     ),
     (
         "Можешь мне это как-то объяснить?",
         "Можешь мне это как-то объяснить?",
         "Можешь мне это как-то объяснить?",
-        "«можешь» — не приказ: настоящий вопрос не трогаем",
+        "a modal is not an imperative: a real question is left alone",
     ),
     (
         "Есть какие-то данные по машинам?",
         "Есть какие-то данные по машинам?",
         "Есть какие-то данные по машинам?",
-        "«есть» — не приказ: настоящий вопрос не трогаем",
+        "the verb to be is not an imperative: a real question is left alone",
     ),
     (
         "Статьи готовы?",
         "Статьи готовы?",
         "Статьи готовы?",
-        "существительное на -и приказом не считается",
+        "a plural noun is not treated as an imperative",
     ),
     (
         "Хорошо, ставь CRM в раз в сутки мониторить.",
         "Хорошо, ставь CRM в раз в сутки мониторить?",
         "Хорошо, ставь CRM в раз в сутки мониторить.",
-        "вводное слово не прячет приказ",
+        "a filler word does not hide the imperative",
     ),
     (
         "Ну ладно, короче, запускай прогон.",
         "Ну ладно, короче, запускай прогон?",
         "Ну ладно, короче, запускай прогон.",
-        "несколько вводных подряд тоже не прячут",
+        "several fillers in a row do not hide it either",
     ),
     (
         "Так у тебя есть работа?",
         "Так у тебя есть работа?",
         "Так у тебя есть работа?",
-        "приказа нет вообще — настоящий вопрос не трогаем",
+        "no imperative at all: a real question is left alone",
     ),
-    # --- приказ с вопросом внутри: знак снимаем (выбор Антона 14.08.2026) ---
+    # --- an order with a question inside: the mark goes (chosen 2026-08-14) ---
     (
         "Ты мне скажи, какие журналы ты их читал.",
         "Ты мне скажи, какие журналы ты их читал?",
         "Ты мне скажи, какие журналы ты их читал.",
-        "приказ раньше вопросительного слова — это поручение",
+        "imperative before the question word: this is an order",
     ),
     (
         "Ещё раз объясни мне, о каких журналах говорил я.",
         "Ещё раз объясни мне, о каких журналах говорил я?",
         "Ещё раз объясни мне, о каких журналах говорил я.",
-        "«раз» перед приказом не должно его прятать",
+        "a noun before the imperative must not hide it",
     ),
     (
         "У нас есть ролик про Bitrix на YouTube, найди его.",
         "У нас есть ролик про Bitrix на YouTube, найди его?",
         "У нас есть ролик про Bitrix на YouTube, найди его.",
-        "приказ в конце фразы тоже считается",
+        "an imperative at the end counts too",
     ),
     (
         "Какие журналы ты их читал.",
         "Какие журналы ты их читал?",
         "Какие журналы ты их читал?",
-        "вопросительное слово раньше приказа — настоящий вопрос",
+        "question word before the imperative: a real question",
     ),
-    # --- ловушки на слова, которые и приказ, и прошедшее время ---
+    # --- traps: words that are both an imperative and a past tense ---
     (
         "Деньги пришли?",
         "Деньги пришли?",
         "Деньги пришли?",
-        "«пришли» после подлежащего — прошедшее время, а не приказ",
+        "an ambiguous verb after a subject is past tense, not an imperative",
     ),
     (
         "Все ключи уже пришли?",
         "Все ключи уже пришли?",
         "Все ключи уже пришли?",
-        "и с лишним словом между подлежащим и глаголом — тоже вопрос",
+        "still a question with a word between the subject and the verb",
     ),
     (
         "Пришли мне ключи?",
         "Пришли мне ключи?",
         "Пришли мне ключи.",
-        "а вот «Пришли мне ключи» — приказ, знак снимаем даже от распознавалки",
+        "but with no subject it is an order: the mark goes, even from the recognizer",
     ),
-    # --- знак, который корректор придумал сам, а зацепиться не за что ---
+    # --- a mark the corrector invented with nothing to go on ---
     (
         "Что-то прям вообще последнее плохо стало.",
         "Что-то прям вообще последнее плохо стало?",
         "Что-то прям вообще последнее плохо стало.",
-        "распознавалка вопроса не слышала, вопросительного слова нет — снимаем",
+        "the recognizer heard no question and there is no question word: dropped",
     ),
     (
         "Интернет опять еле живой.",
         "Интернет опять еле живой?",
         "Интернет опять еле живой.",
-        "и тут корректор придумал знак на пустом месте",
+        "here too the corrector invented a mark out of nothing",
     ),
     (
         "Мы заливаем статьи уже?",
         "Мы заливаем статьи уже?",
         "Мы заливаем статьи уже?",
-        "распознавалка сама услышала вопрос — знаку верим",
+        "the recognizer heard the question itself: the mark is trusted",
     ),
     (
         "Почему статьи не залились.",
         "Почему статьи не залились?",
         "Почему статьи не залились?",
-        "есть вопросительное слово — знак от корректора принимаем",
+        "a question word is present: the corrector mark is accepted",
     ),
 ]
 
@@ -253,11 +253,11 @@ def main() -> None:
             bad += 1
         print(f"[{'v' if ok else 'X'}] {why}")
         if not ok:
-            print(f"      сказал:  {said}")
-            print(f"      вернул:  {polished}")
-            print(f"      ждали:   {want}")
-            print(f"      вышло:   {got}")
-    print(f"\n{len(CASES)-bad} из {len(CASES)} сошлось")
+            print(f"      said:     {said}")
+            print(f"      returned: {polished}")
+            print(f"      wanted:   {want}")
+            print(f"      got:      {got}")
+    print(f"\n{len(CASES)-bad} of {len(CASES)} passed")
     sys.exit(1 if bad else 0)
 
 

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Диктовка: зажал клавишу — сказал — текст в окне.
+"""Dictation: hold the key, speak, the text lands in the window.
 
-Запуск:
-    run.ps1              — работать
-    run.ps1 mics         — какие есть микрофоны
-    run.ps1 keytest      — какой код у клавиши
-    run.ps1 selftest     — всё ли на месте
-    run.ps1 bench FILE   — сколько секунд занимает распознавание
+Usage:
+    run.ps1              — run it
+    run.ps1 mics         — list the microphones
+    run.ps1 keytest      — find the scan code of a key
+    run.ps1 selftest     — check everything is in place
+    run.ps1 bench FILE   — how long recognition takes
 """
 import io
 import sys
@@ -79,30 +79,30 @@ class Dictation:
         self.last: dict = {}
         self.mouse_hook = None
 
-    # ---------- загрузка ----------
+    # ---------- startup ----------
     def boot(self) -> None:
         from .asr import Asr
 
-        self.hud.set("think", "гружусь")
-        mic_name = "по умолчанию"
+        self.hud.set("think", "loading")
+        mic_name = "default"
         if self.device is not None:
             mic_name = audio_mod.sd.query_devices(self.device)["name"]
-        log(f"микрофон: {mic_name}")
+        log(f"microphone: {mic_name}")
 
         self.asr = Asr(self.cfg, self.terms)
         took = self.asr.load()
-        log(f"распознавалка {self.asr.model_name} на {self.asr.device}: {took:.1f} с")
+        log(f"recognizer {self.asr.model_name} on {self.asr.device}: {took:.1f} s")
         warm = self.asr.warmup()
-        log(f"прогрев: {warm:.2f} с")
+        log(f"warmup: {warm:.2f} s")
 
         if self.polisher.check():
             warm = self.polisher.warmup()
-            log(f"причёсывание: {self.polisher.model} (подняли за {warm:.1f} с)")
+            log(f"corrector: {self.polisher.model} (loaded in {warm:.1f} s)")
         else:
-            log(f"причёсывание ВЫКЛЮЧЕНО — {self.polisher.reason}")
-            log("  (диктовка работает и без него, текст будет как есть)")
+            log(f"corrector OFF — {self.polisher.reason}")
+            log("  (dictation works without it; the text comes out raw)")
 
-        log(f"словарь замен: {len(self.fixes)} пар, терминов в подсказке: {len(self.terms)}")
+        log(f"replacements: {len(self.fixes)} pairs, terms in the hint: {len(self.terms)}")
         web = self.cfg.get("web", {})
         if web.get("enabled", True):
             from . import server
@@ -112,33 +112,33 @@ class Dictation:
                     int(web.get("port", 8756)), self.fixes, self.reload_terms,
                     self.polisher,
                 )
-                log(f"страница диктовок: {url}")
+                log(f"dictation page: {url}")
                 if web.get("open_on_start", False):
                     import webbrowser
 
                     webbrowser.open(url)
             except Exception as exc:
-                log(f"страница не поднялась: {exc}")
+                log(f"the page did not start: {exc}")
 
-        # Если прошлый раз программу убили во время записи, чужой звук остался
-        # приглушённым — возвращаем его обратно.
+        # If the app was killed mid-recording last time, other apps are still
+        # ducked — give their volume back.
         self.ducker.recover()
         if self.ducker.enabled:
-            log(f"чужой звук на время записи: до {self.ducker.level*100:.0f}%")
+            log(f"other audio while recording: down to {self.ducker.level*100:.0f}%")
 
         self.bind_keys()
         threading.Thread(target=self._keep_warm, daemon=True).start()
-        self.hud.set("ok", "готово", hide_after=1.5)
-        log(f"ГОТОВО. Клавиша {self.key}: зажать = говорить, короткое нажатие = без рук.")
-        log(f"Поправить последнее: {self.fix_hotkey}. Отмена записи: Esc.")
+        self.hud.set("ok", "ready", hide_after=1.5)
+        log(f"READY. Key {self.key}: hold = speak, tap = hands-free.")
+        log(f"Fix the last take: {self.fix_hotkey}. Cancel recording: Esc.")
         if self.flip_hotkey:
-            log(f"Точка <-> вопрос в конце: {self.flip_hotkey}.")
+            log(f"Full stop <-> question mark: {self.flip_hotkey}.")
 
     def reload_terms(self) -> None:
-        """Перечитывает термины на ходу — без перезапуска программы.
+        """Re-reads the terms live, with no restart.
 
-        Слово, добавленное на странице, должно работать со следующей же
-        диктовки: и в подсказке распознавалке, и у корректора.
+        A word added on the page has to work from the very next take: both in
+        the hint to the recognizer and in the corrector.
         """
         from .asr import build_prompt
         from .polish import allowed_words
@@ -154,14 +154,14 @@ class Dictation:
         self.polisher.terms = self.terms
         self.polisher.allowed = allowed_words(self.terms, self.fixes)
         self.polisher.protected = self.mywords
-        log(f"термины перечитаны: {len(self.terms)} шт")
+        log(f"terms reloaded: {len(self.terms)}")
 
     def _keep_warm(self) -> None:
-        """Держим корректора в видеопамяти.
+        """Keeps the corrector resident in VRAM.
 
-        LM Studio выгружает модель после простоя, и первая диктовка после
-        перерыва ждёт её загрузку (замерено: 2,1 с вместо 0,2). Тихо
-        напоминаем о себе раз в 10 минут.
+        LM Studio unloads a model after a while idle, and the first take after
+        a break then waits for it (measured: 2.1 s instead of 0.2). We quietly
+        ping it every 10 minutes.
         """
         while True:
             time.sleep(600)
@@ -182,14 +182,14 @@ class Dictation:
         try:
             keyboard.add_hotkey(self.fix_hotkey, self.on_fix, suppress=False)
         except Exception as exc:
-            log(f"клавиша правки {self.fix_hotkey} не встала: {exc}")
+            log(f"the fix key {self.fix_hotkey} did not bind: {exc}")
         if self.flip_hotkey:
             try:
                 keyboard.add_hotkey(
                     self.flip_hotkey, self.on_flip_question, suppress=False
                 )
             except Exception as exc:
-                log(f"клавиша знака {self.flip_hotkey} не встала: {exc}")
+                log(f"the mark key {self.flip_hotkey} did not bind: {exc}")
 
         rp = self.cfg.get("repaste", {})
         if not rp.get("enabled", True):
@@ -197,9 +197,9 @@ class Dictation:
         if rp.get("key"):
             try:
                 keyboard.add_hotkey(rp["key"], self.on_repaste, suppress=False)
-                log(f"вставить ещё раз: клавиша {rp['key']}")
+                log(f"paste again: key {rp['key']}")
             except Exception as exc:
-                log(f"клавиша {rp['key']} не встала: {exc}")
+                log(f"key {rp['key']} did not bind: {exc}")
         if rp.get("button"):
             from . import mousehook
 
@@ -208,20 +208,20 @@ class Dictation:
             )
             try:
                 if self.mouse_hook.start():
-                    mode = "перехватываю" if rp.get("suppress", False) else "не перехватываю"
-                    log(f"вставить ещё раз: боковые кнопки мыши "
+                    mode = "intercepted" if rp.get("suppress", False) else "not intercepted"
+                    log(f"paste again: side mouse buttons "
                         f"({self.mouse_hook.names}, {mode})")
                 else:
-                    log(f"кнопки мыши «{rp['button']}» не опознаны")
+                    log(f"mouse buttons {rp['button']!r} not recognized")
             except Exception as exc:
-                log(f"мышь не подцепилась: {exc}")
+                log(f"the mouse hook failed: {exc}")
 
-    # ---------- клавиша ----------
+    # ---------- the key ----------
     def on_down(self, _event=None) -> None:
         if self.recording:
             if self.locked:
                 self.stop_and_process()
-            return  # автоповтор клавиши
+            return  # key auto-repeat
         self.start()
 
     def on_up(self, _event=None) -> None:
@@ -230,7 +230,7 @@ class Dictation:
         held_ms = (time.perf_counter() - self.t_down) * 1000
         if held_ms < self.tap_ms:
             self.locked = True
-            self.hud.set("lock", "пишу без рук")
+            self.hud.set("lock", "hands-free")
         else:
             self.stop_and_process()
 
@@ -239,53 +239,53 @@ class Dictation:
             self.recording = self.locked = False
             self.recorder.stop()
             self.ducker.restore()
-            self.hud.set("warn", "отменено", hide_after=1.0)
-            log("запись отменена")
+            self.hud.set("warn", "cancelled", hide_after=1.0)
+            log("recording cancelled")
 
     def on_repaste(self) -> None:
-        """Вставить последнюю диктовку в окно под мышкой.
+        """Paste the last take into the window under the mouse.
 
-        Для случая «текст улетел не туда»: наводишь на нужное окно, жмёшь
-        кнопку. Программа делает это окно активным и вставляет.
+        For the "the text went to the wrong place" case: point at the right
+        window and press the button. The app brings it forward and pastes.
         """
         text = (self.last or {}).get("final", "")
         if not text:
-            self.hud.set("warn", "нечего вставлять", hide_after=1.2)
+            self.hud.set("warn", "nothing to paste", hide_after=1.2)
             return
         from . import mousehook
 
         hwnd = mousehook.window_under_cursor()
         title = mousehook.window_title(hwnd)
         if not mousehook.focus(hwnd):
-            self.hud.set("err", "окно не отдало фокус", hide_after=2.0)
-            log(f"не смог активировать окно: {title!r}")
+            self.hud.set("err", "window refused focus", hide_after=2.0)
+            log(f"could not bring the window forward: {title!r}")
             return
-        time.sleep(0.06)  # окну нужно мгновение, чтобы принять фокус
+        time.sleep(0.06)  # the window needs a moment to accept focus
         paste_text(
             text,
             self.cfg["paste"].get("hotkey", "ctrl+v"),
             float(self.cfg["paste"].get("restore_clipboard_after_s", 1.0)),
         )
-        self.hud.set("ok", "вставил", hide_after=1.0)
-        log(f"вставил ещё раз в окно: {title[:60]!r}")
+        self.hud.set("ok", "pasted", hide_after=1.0)
+        log(f"pasted again into window: {title[:60]!r}")
 
     def on_flip_question(self) -> None:
-        """Меняет знак в конце последней диктовки: точка <-> вопрос.
+        """Flips the final mark of the last take: full stop <-> question mark.
 
-        Зачем это руками. «Скоро это уже закончится» и «Скоро это уже
-        закончится?» — одни и те же слова, разница только в голосе. Замерено
-        14.08.2026: по голосу вопрос не ловится совсем (2 из 117 на его
-        записях), подсказка предыдущими репликами и прямой вопрос модели делают
-        только хуже. Значит, последнее слово за человеком — но одной кнопкой,
-        а не через окно правки.
+        Why this is manual. "Скоро это уже закончится" and "Скоро это уже
+        закончится?" are the same words; only the voice differs. Measured
+        2026-08-14: the voice carries no usable signal (2 out of 117 on real
+        takes), and both feeding previous lines as context and asking the model
+        directly made things worse. So the last word is the human's — but with
+        one key, not through the edit window.
 
-        Правит и то, что уже вставлено в окно: стирает последний знак и ставит
-        нужный. Курсор при этом должен стоять сразу после вставленного текста —
-        так оно и есть, если нажать сразу после диктовки.
+        It also fixes what was already pasted: erases the last mark and types
+        the right one. The cursor must sit right after the pasted text, which is
+        the case if you press it straight after dictating.
         """
         text = (self.last or {}).get("final", "")
         if not text.strip():
-            self.hud.set("warn", "нечего править", hide_after=1.2)
+            self.hud.set("warn", "nothing to fix", hide_after=1.2)
             return
 
         import keyboard
@@ -295,16 +295,16 @@ class Dictation:
         new_text, erase, want = flip_question(text)
         self.last["final"] = new_text
 
-        # правим уже вставленный текст: лишний знак стереть, нужный набрать
+        # fix the already pasted text: erase the wrong mark, type the right one
         try:
             for _ in range(erase):
                 keyboard.send("backspace")
                 time.sleep(0.02)
             keyboard.write(want)
         except Exception as exc:
-            log(f"поправить в окне не вышло: {exc}")
+            log(f"could not fix it in the window: {exc}")
 
-        # запоминаем правку: она идёт и на страницу, и в материал для обучения
+        # remember the correction: it goes to the page and to the training data
         rec_id = (self.last or {}).get("id")
         if rec_id:
             try:
@@ -314,42 +314,42 @@ class Dictation:
                 if res.get("learned"):
                     self.fixes.load()
             except Exception as exc:
-                log(f"правку не записал: {exc}")
+                log(f"the correction was not saved: {exc}")
 
-        self.hud.set("ok", f"поставил «{want}»", hide_after=1.2)
-        log(f"знак в конце -> «{want}»")
+        self.hud.set("ok", f"set {want!r}", hide_after=1.2)
+        log(f"final mark -> {want!r}")
         log(f"  {self.last['final']}")
 
     def on_fix(self) -> None:
         if not self.last or self.hud.root is None:
-            self.hud.set("warn", "нечего править", hide_after=1.2)
+            self.hud.set("warn", "nothing to fix", hide_after=1.2)
             return
         from .fixwin import open_window
 
         def done(learned: int):
-            self.hud.set("ok", f"запомнил: {learned}", hide_after=1.8)
-            log(f"запомнил пар: {learned} (всего {len(self.fixes)})")
+            self.hud.set("ok", f"learned: {learned}", hide_after=1.8)
+            log(f"pairs learned: {learned} (total {len(self.fixes)})")
 
         self.hud.root.after(
             0, lambda: open_window(self.hud.root, self.last, self.fixes, done)
         )
 
-    # ---------- запись ----------
+    # ---------- recording ----------
     def start(self) -> None:
-        # Клавиша при удержании стреляет автоповтором. Если микрофон не открылся,
-        # без паузы получим сотню одинаковых попыток в секунду.
+        # A held key fires auto-repeat. If the mic failed to open, without a
+        # pause we would get a hundred identical attempts per second.
         if time.perf_counter() < self.mic_cooldown:
             return
         try:
             self.recorder.start()
         except Exception as exc:
             self.mic_cooldown = time.perf_counter() + 3.0
-            self.hud.set("err", "микрофон не открылся", hide_after=3.0)
-            log(f"микрофон не открылся: {exc}")
+            self.hud.set("err", "mic did not open", hide_after=3.0)
+            log(f"the microphone did not open: {exc}")
             return
         self.recording, self.locked = True, False
         self.t_down = time.perf_counter()
-        self.ducker.duck()      # чужой звук потише, пока говоришь
+        self.ducker.duck()      # turn other audio down while you speak
         self.hud.set("rec", "")
         threading.Thread(target=self._watchdog, daemon=True).start()
 
@@ -357,7 +357,7 @@ class Dictation:
         started = time.perf_counter()
         while self.recording:
             if time.perf_counter() - started > self.max_seconds:
-                log("сработала страховка по времени")
+                log("the maximum-length safety net fired")
                 self.stop_and_process()
                 return
             time.sleep(0.25)
@@ -366,9 +366,10 @@ class Dictation:
         if not self.recording:
             return
         self.recording = self.locked = False
-        self.hud.set("think", "думаю")
-        # Останавливаем в стороне: дозапись хвоста ждёт до долей секунды, и на
-        # ниточке клавиатуры это ожидание держало бы все остальные клавиши.
+        self.hud.set("think", "thinking")
+        # Stop on another thread: recording the tail waits a fraction of a
+        # second, and on the keyboard thread that wait would block every other
+        # key.
         threading.Thread(target=self._finish, daemon=True).start()
 
     def _finish(self) -> None:
@@ -378,48 +379,49 @@ class Dictation:
         self.ducker.restore()
         self.process(data)
 
-    # ---------- обработка ----------
+    # ---------- processing ----------
     def transcribe_resilient(self, audio: np.ndarray) -> tuple[str, float]:
-        """Распознаёт, а если видеокарта отвалилась — поднимает модель заново.
+        """Recognizes; if the GPU fell away, brings the model back up.
 
-        Зачем. 19.08.2026 компьютер поспал, контекст видеокарты умер, и программа
-        четыре дня отвечала «СБОЙ» на каждую диктовку. Сама она из этого выйти не
-        могла: модель в памяти была мертва, а перезагружать её было некому.
+        Why. On 2026-08-19 the machine slept, the GPU context died, and the app
+        spent four days answering "FAILED" to every take. It could not get out
+        of that on its own: the in-memory model was dead and nothing was going
+        to reload it.
         """
         try:
             return self.asr.transcribe(audio)
         except Exception as exc:
             if not self.asr.looks_like_lost_gpu(exc):
                 raise
-            log(f"видеокарта отвалилась ({type(exc).__name__}), поднимаю модель заново")
-            self.hud.set("think", "поднимаю модель")
+            log(f"the GPU fell away ({type(exc).__name__}), reloading the model")
+            self.hud.set("think", "reloading")
             where = self.asr.reload()
             if where == "cpu":
-                log("не вышло — перешёл на процессор. Будет медленнее.")
-                log(r"Починится перезапуском: .\start-background.ps1 -Restart")
+                log("failed — switched to the CPU. This will be slower.")
+                log(r"A restart fixes it: .\start-background.ps1 -Restart")
             else:
-                log(f"модель снова на {where}")
+                log(f"the model is back on {where}")
             return self.asr.transcribe(audio)
 
     def process(self, data: np.ndarray) -> None:
         if not self.busy.acquire(blocking=False):
-            log("предыдущая диктовка ещё считается — пропускаю")
+            log("the previous take is still being processed — skipping")
             return
         try:
             t_all = time.perf_counter()
             secs = len(data) / audio_mod.TARGET_SR
             peak, rms = audio_mod.loudness(data)
             if secs < MIN_SECONDS:
-                self.hud.set("warn", "слишком коротко", hide_after=1.2)
+                self.hud.set("warn", "too short", hide_after=1.2)
                 return
             if rms < SILENCE_RMS:
-                self.hud.set("warn", "тишина в микрофоне", hide_after=2.0)
-                log(f"тишина: {secs:.1f} с, пик {peak:.4f}")
+                self.hud.set("warn", "silence on the mic", hide_after=2.0)
+                log(f"silence: {secs:.1f} s, peak {peak:.4f}")
                 return
 
             raw, t_asr = self.transcribe_resilient(audio_mod.normalize(data))
             if not raw.strip():
-                self.hud.set("warn", "ничего не разобрала", hide_after=1.5)
+                self.hud.set("warn", "nothing recognized", hide_after=1.5)
                 return
 
             pre, n_pre = self.fixes.apply(raw)
@@ -460,17 +462,17 @@ class Dictation:
                     "wav": wav,
                 }
             )
-            self.hud.set("ok", f"{total:.1f} с", hide_after=1.2)
-            log(f"{secs:.1f} с речи -> {total:.2f} с "
-                f"(распознала {t_asr:.2f}, причесала {t_pol:.2f}, {note})")
+            self.hud.set("ok", f"{total:.1f} s", hide_after=1.2)
+            log(f"{secs:.1f} s of speech -> {total:.2f} s "
+                f"(recognized {t_asr:.2f}, corrected {t_pol:.2f}, {note})")
             log(f"  {final}")
             for src, dst in flipped:
-                log(f"  вернула приказ: «{src}» -> «{dst}»")
+                log(f"  restored the order: {src!r} -> {dst!r}")
             for src, dst in promoted:
-                log(f"  запомнила: «{src}» -> «{dst}»")
+                log(f"  learned: {src!r} -> {dst!r}")
         except Exception as exc:
-            self.hud.set("err", "сбой", hide_after=2.5)
-            log(f"СБОЙ: {type(exc).__name__}: {exc}")
+            self.hud.set("err", "failed", hide_after=2.5)
+            log(f"FAILED: {type(exc).__name__}: {exc}")
         finally:
             self.busy.release()
 
@@ -482,15 +484,15 @@ class Dictation:
             pass
 
 
-# ---------- вспомогательные команды ----------
+# ---------- helper commands ----------
 def cmd_mics() -> None:
     for d in audio_mod.list_inputs():
         print(f"{d['index']:>3}  {d['hostapi']:<20} {d['name']}  "
-              f"({d['default_samplerate']} Гц, {d['channels']} кан.)")
+              f"({d['default_samplerate']} Hz, {d['channels']} ch)")
 
 
 def cmd_keytest(seconds: int = 12) -> None:
-    """Ловит нажатия несколько секунд и говорит, долетает ли нужная клавиша."""
+    """Catches key presses for a few seconds and says whether the wanted key arrives."""
     import keyboard
 
     cfg = cfg_mod.load()
@@ -500,8 +502,8 @@ def cmd_keytest(seconds: int = 12) -> None:
     except Exception:
         want_codes = set()
 
-    print(f"Жми клавишу, которую хочешь под диктовку. Слушаю {seconds} секунд.")
-    print(f"(в настройках сейчас стоит «{want}»)\n")
+    print(f"Press the key you want for dictation. Listening for {seconds} s.")
+    print(f"(the settings currently say {want!r})\n")
 
     pressed: dict = {}
 
@@ -512,8 +514,8 @@ def cmd_keytest(seconds: int = 12) -> None:
         if key in pressed:
             return
         pressed[key] = True
-        mark = "  <-- ЭТА И СТОИТ В НАСТРОЙКАХ" if e.scan_code in want_codes else ""
-        print(f"  имя: {str(e.name)!r:<14} скан-код: {e.scan_code}{mark}")
+        mark = "  <-- THIS IS THE ONE IN THE SETTINGS" if e.scan_code in want_codes else ""
+        print(f"  name: {str(e.name)!r:<14} scan code: {e.scan_code}{mark}")
 
     keyboard.hook(show)
     time.sleep(seconds)
@@ -521,33 +523,33 @@ def cmd_keytest(seconds: int = 12) -> None:
 
     print()
     if not pressed:
-        print("Ни одного нажатия не поймал.")
+        print("No key presses caught.")
         return
     hit = [k for k in pressed if k[1] in want_codes]
     if hit:
-        print(f"ГОДИТСЯ: клавиша «{want}» долетает, менять ничего не надо.")
+        print(f"GOOD: the key {want!r} arrives, nothing to change.")
     else:
-        names = ", ".join(f"{k[0]} (код {k[1]})" for k in pressed)
-        print(f"Клавиша «{want}» НЕ долетела. Поймал вот это: {names}")
-        print("Впиши подходящее в config.toml -> [hotkey] name или scancode.")
+        names = ", ".join(f"{k[0]} (code {k[1]})" for k in pressed)
+        print(f"The key {want!r} did NOT arrive. Caught these instead: {names}")
+        print("Put the right one into config.toml -> [hotkey] name or scancode.")
 
 
 def cmd_selftest() -> None:
     ok = True
     cfg = cfg_mod.load()
-    print("=== проверка ===\n")
+    print("=== self-test ===\n")
 
     hint = cfg["mic"].get("name", "")
     devices = audio_mod.find_devices(hint)
     if devices == [None] and hint:
-        print(f"[X] микрофон «{hint}» не найден. Список: run.ps1 mics")
+        print(f"[X] microphone {hint!r} not found. List them: run.ps1 mics")
         ok = False
     else:
         idx = devices[0]
-        name = "по умолчанию" if idx is None else audio_mod.sd.query_devices(idx)["name"]
-        print(f"[v] микрофон: {name} (запасных входов: {len(devices)-1})")
+        name = "default" if idx is None else audio_mod.sd.query_devices(idx)["name"]
+        print(f"[v] microphone: {name} (fallback inputs: {len(devices)-1})")
 
-    print("[.] пробую записать 1 секунду...")
+    print("[.] trying to record 1 second...")
     try:
         rec = audio_mod.Recorder(devices, int(cfg["mic"]["samplerate"]))
         rec.start()
@@ -557,41 +559,41 @@ def cmd_selftest() -> None:
         dev, sr, ch = rec.recipe
         api = audio_mod.sd.query_hostapis()[
             audio_mod.sd.query_devices(dev)["hostapi"]
-        ]["name"] if dev is not None else "по умолчанию"
-        print(f"[v] открылся через {api}: {sr} Гц, {ch} кан.")
-        print(f"[v] записалось {len(data)/16000:.2f} с, пик {peak:.4f}, громкость {rms:.4f}")
+        ]["name"] if dev is not None else "default"
+        print(f"[v] opened via {api}: {sr} Hz, {ch} ch")
+        print(f"[v] recorded {len(data)/16000:.2f} s, peak {peak:.4f}, level {rms:.4f}")
         if rms < SILENCE_RMS:
-            print("    (тихо — это нормально, если ты молчал)")
+            print("    (quiet is fine if you said nothing)")
     except Exception as exc:
-        print(f"[X] запись не пошла: {exc}")
+        print(f"[X] recording failed: {exc}")
         ok = False
 
-    print("[.] гружу распознавалку...")
+    print("[.] loading the recognizer...")
     try:
         from .asr import Asr
 
         asr = Asr(cfg, cfg_mod.glossary())
         took = asr.load()
-        print(f"[v] {asr.model_name} на {asr.device}, {took:.1f} с")
+        print(f"[v] {asr.model_name} on {asr.device}, {took:.1f} s")
         warm = asr.warmup()
-        print(f"[v] прогрев {warm:.2f} с")
+        print(f"[v] warmup {warm:.2f} s")
         if asr.device != "cuda":
-            print("[!] работает на процессоре — будет медленно")
+            print("[!] running on the CPU — this will be slow")
             ok = False
     except Exception as exc:
-        print(f"[X] распознавалка не поднялась: {exc}")
+        print(f"[X] the recognizer did not start: {exc}")
         ok = False
 
     pol = Polisher(cfg, cfg_mod.glossary())
     if pol.check():
-        print(f"[v] причёсывание: LM Studio, модель {pol.model}")
+        print(f"[v] corrector: LM Studio, model {pol.model}")
     else:
-        print(f"[!] причёсывания не будет: {pol.reason}")
+        print(f"[!] no corrector: {pol.reason}")
 
     fx = Fixes(cfg_mod.FIXES_PATH)
-    print(f"[v] словарь замен: {len(fx)} пар")
+    print(f"[v] replacements: {len(fx)} pairs")
 
-    print("\n" + ("ВСЁ НА МЕСТЕ" if ok else "ЕСТЬ ПРОБЛЕМЫ — смотри строки с [X]"))
+    print("\n" + ("ALL GOOD" if ok else "PROBLEMS — see the [X] lines"))
 
 
 def cmd_bench(path: str) -> None:
@@ -599,8 +601,8 @@ def cmd_bench(path: str) -> None:
 
     cfg = cfg_mod.load()
     asr = Asr(cfg, cfg_mod.glossary())
-    print(f"загрузка: {asr.load():.1f} с")
-    print(f"прогрев:  {asr.warmup():.2f} с")
+    print(f"load:   {asr.load():.1f} s")
+    print(f"warmup: {asr.warmup():.2f} s")
 
     import wave
 
@@ -608,12 +610,12 @@ def cmd_bench(path: str) -> None:
         sr = wf.getframerate()
         pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
     data = audio_mod._resample(pcm.astype(np.float32) / 32768.0, sr, 16000)
-    print(f"файл: {len(data)/16000:.1f} с речи\n")
+    print(f"file: {len(data)/16000:.1f} s of speech\n")
 
     for i in range(3):
         text, took = asr.transcribe(data)
-        print(f"прогон {i+1}: {took:.2f} с")
-    print(f"\nтекст: {text}")
+        print(f"run {i+1}: {took:.2f} s")
+    print(f"\ntext: {text}")
 
 
 SPOKENLY = Path(r"C:\Users\panto\AppData\Roaming\Spokenly\History")
@@ -621,11 +623,12 @@ RU_WORD_RE = __import__("re").compile(r"[а-яё]{3,}", __import__("re").IGNOREC
 
 
 def cmd_learnwords(min_count: int = 1) -> None:
-    """Собирает список русских слов, которые ты реально говоришь.
+    """Builds the list of your own-language words that you actually say.
 
-    Нужен, чтобы корректор не переводил твои слова в английские термины
-    («сессию» -> «session»). Берёт всё, что уже надиктовано: историю Spokenly
-    и журналы этой программы. Чем дольше пользуешься — тем список полнее.
+    It stops the corrector from turning your words into English terms
+    ("сессию" -> "session"). Built from everything already dictated: the
+    Spokenly history and this app's own logs. The longer you use it, the fuller
+    the list.
     """
     import json
     from collections import Counter
@@ -657,34 +660,34 @@ def cmd_learnwords(min_count: int = 1) -> None:
 
     keep = sorted(w for w, c in counts.items() if c >= min_count)
     header = [
-        "# Русские слова, которые ты реально говоришь.",
-        f"# Собрано из {sources} расшифровок, порог — {min_count} и больше повторов.",
-        "# Корректору запрещено подменять эти слова английскими терминами.",
-        "# Пересобрать: run.ps1 learnwords",
+        "# Words of your own language that you actually say.",
+        f"# Built from {sources} transcripts, threshold: seen {min_count}+ times.",
+        "# The corrector may not swap these for English terms.",
+        "# Rebuild with: run.ps1 learnwords",
         "",
     ]
     cfg_mod.MYWORDS_PATH.write_text(
         "\n".join(header + keep) + "\n", encoding="utf-8"
     )
-    print(f"расшифровок просмотрено: {sources}")
-    print(f"разных русских слов:     {len(counts)}")
-    print(f"попало в список:         {len(keep)} (встречались {min_count}+ раз)")
-    print(f"файл:                    {cfg_mod.MYWORDS_PATH}")
+    print(f"transcripts scanned:  {sources}")
+    print(f"distinct words:       {len(counts)}")
+    print(f"kept in the list:     {len(keep)} (seen {min_count}+ times)")
+    print(f"file:                 {cfg_mod.MYWORDS_PATH}")
 
 
 def cmd_import_spokenly() -> None:
-    """Забирает записи из Spokenly к себе — чтобы обучение не начиналось с нуля.
+    """Imports takes from Spokenly so training does not start from zero.
 
-    Берём звук и расшифровку, которую сделал ElevenLabs (за него ты платишь,
-    и на проверке он оказался хорош). Дальше это обычные записи: их видно на
-    странице, можно послушать, поправить и пометить.
+    Takes the audio and the transcript ElevenLabs produced (you pay for it, and
+    on inspection it turned out to be good). From then on they are ordinary
+    takes: visible on the page, playable, editable, markable.
     """
     import json
     import wave
 
     src = SPOKENLY
     if not src.exists():
-        print(f"нет папки {src}")
+        print(f"no such folder: {src}")
         return
     cfg_mod.ensure_dirs()
 
@@ -750,7 +753,7 @@ def cmd_import_spokenly() -> None:
                 "raw": text,
                 "after_fixes": text,
                 "final": text,
-                "polish_note": "перенесено из Spokenly (расшифровка ElevenLabs)",
+                "polish_note": "imported from Spokenly (ElevenLabs transcript)",
                 "ms_asr": 0,
                 "ms_polish": 0,
                 "ms_total": 0,
@@ -767,17 +770,17 @@ def cmd_import_spokenly() -> None:
             for rec in recs:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-    print(f"перенесено:   {added} записей, {total_sec/60:.1f} мин речи")
-    print(f"пропущено:    {skipped} (уже были)")
-    print("Теперь они на странице: можно слушать, править и помечать.")
-    print("Помеченные как плохие в дообучение не пойдут.")
+    print(f"imported: {added} takes, {total_sec/60:.1f} min of speech")
+    print(f"skipped:  {skipped} (already there)")
+    print("They are on the page now: listen, edit and mark them.")
+    print("Ones marked bad will be left out of training.")
 
 
 def cmd_dry(paths: list[str]) -> None:
-    """Прогон всей цепочки на готовых файлах — без микрофона и без вставки.
+    """Runs the whole chain over existing files — no microphone, no pasting.
 
-    Показывает каждую ступень отдельно: что услышала, что починил словарь,
-    что сделал корректор, что откатил замок, и сколько на всё ушло.
+    Shows every stage separately: what was heard, what the dictionary fixed,
+    what the corrector did, what the lock rolled back, and how long it all took.
     """
     import wave
 
@@ -785,14 +788,14 @@ def cmd_dry(paths: list[str]) -> None:
     from .asr import Asr
 
     d.asr = Asr(d.cfg, d.terms)
-    print(f"загрузка распознавалки: {d.asr.load():.1f} с "
-          f"({d.asr.model_name} на {d.asr.device})")
-    print(f"прогрев: {d.asr.warmup():.2f} с")
+    print(f"loading the recognizer: {d.asr.load():.1f} s "
+          f"({d.asr.model_name} on {d.asr.device})")
+    print(f"warmup: {d.asr.warmup():.2f} s")
     if d.polisher.check(force=True):
-        print(f"корректор: {d.polisher.model} (подняли за {d.polisher.warmup():.1f} с)")
+        print(f"corrector: {d.polisher.model} (loaded in {d.polisher.warmup():.1f} s)")
     else:
-        print(f"корректор недоступен: {d.polisher.reason}")
-    print(f"словарь: {len(d.fixes)} пар, терминов: {len(d.terms)}\n")
+        print(f"corrector unavailable: {d.polisher.reason}")
+    print(f"dictionary: {len(d.fixes)} pairs, terms: {len(d.terms)}\n")
 
     totals = []
     for path in paths:
@@ -812,23 +815,23 @@ def cmd_dry(paths: list[str]) -> None:
         total = time.perf_counter() - t0
         totals.append((len(data) / audio_mod.TARGET_SR, total, t_asr, t_pol))
 
-        print(f"--- {Path(path).name} ({len(data)/audio_mod.TARGET_SR:.1f} с речи) ---")
-        print(f"услышала:  {raw}")
+        print(f"--- {Path(path).name} ({len(data)/audio_mod.TARGET_SR:.1f} s of speech) ---")
+        print(f"heard:     {raw}")
         if n_fix:
-            print(f"словарь:   {pre}   [починил слов: {n_fix}]")
+            print(f"dictionary:{pre}   [words fixed: {n_fix}]")
         if final != pre:
-            print(f"корректор: {final}   [{note}]")
-        elif note != "ок":
-            print(f"корректор: без изменений   [{note}]")
-        print(f"время:     {total:.2f} с  "
-              f"(распознала {t_asr:.2f}, причесала {t_pol:.2f})\n")
+            print(f"corrector: {final}   [{note}]")
+        elif note != "ok":
+            print(f"corrector: unchanged   [{note}]")
+        print(f"time:      {total:.2f} s  "
+              f"(recognized {t_asr:.2f}, corrected {t_pol:.2f})\n")
 
     if totals:
         n = len(totals)
-        print(f"=== по {n} записям ===")
-        print(f"средняя длина речи: {sum(t[0] for t in totals)/n:.1f} с")
-        print(f"среднее время:      {sum(t[1] for t in totals)/n:.2f} с")
-        print(f"худшее время:       {max(t[1] for t in totals):.2f} с")
+        print(f"=== over {n} takes ===")
+        print(f"average speech length: {sum(t[0] for t in totals)/n:.1f} s")
+        print(f"average time:         {sum(t[1] for t in totals)/n:.2f} s")
+        print(f"worst time:           {max(t[1] for t in totals):.2f} s")
 
 
 def main() -> None:
@@ -857,8 +860,8 @@ def main() -> None:
 
         cfg = cfg_mod.load()
         url = f"http://127.0.0.1:{cfg.get('web', {}).get('port', 8756)}/"
-        print(f"открываю {url}")
-        print("(страницу поднимает сама диктовка — она должна быть запущена)")
+        print(f"opening {url}")
+        print("(the page is served by the app itself — it has to be running)")
         webbrowser.open(url)
     else:
         Dictation().run()

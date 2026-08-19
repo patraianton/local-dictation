@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Очная ставка моделей-корректоров на настоящих расшифровках Антона.
+"""Head-to-head of corrector models on real transcripts.
 
-Берём сырой текст распознавалки из eval-result.json, прогоняем через
-каждую модель в LM Studio и смотрим: сколько секунд и что получилось.
-
-    ..\\.venv\\Scripts\\python.exe polishbench.py [сколько] [вариант]
+Takes the raw recognizer text from eval-result.json, runs it through every
+model in LM Studio and shows how many seconds it took and what came out.
 """
 import json
 import sys

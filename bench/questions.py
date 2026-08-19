@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Сколько вопросов теряется: «Ты проверил?» превращается в «Ты проверил.»
+"""How many questions are lost: "Ты проверил?" becomes "Ты проверил."
 
-В русском вопрос часто отличается от утверждения только интонацией, а
-распознавалка склонна ставить точку. Считаем по всем записям Антона,
-сравнивая с ElevenLabs.
+In Russian a question often differs from a statement by intonation alone, and
+the recognizer tends to put a full stop. Counted over all recordings,
 
     ..\\.venv\\Scripts\\python.exe questions.py
 """

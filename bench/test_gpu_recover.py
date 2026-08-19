@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-r"""Проверка: программа сама встаёт после того, как отвалилась видеокарта.
+r"""Checks that the app gets back up after the GPU falls away.
+
+On 2026-08-19 the machine slept, the GPU context died, and the app spent four
+days writing "FAILED" for every take until it was restarted by hand.
 
     ..\.venv\Scripts\python.exe test_gpu_recover.py
-
-19.08.2026 компьютер поспал, контекст видеокарты умер, и программа четыре дня
-писала «СБОЙ» на каждую диктовку, пока её не перезапустили руками.
 """
 import sys
 from pathlib import Path
@@ -129,7 +129,7 @@ def main() -> None:
     except RuntimeError:
         check(asr.reloads == 1, "не молчит, если починиться не удалось")
 
-    print(f"\n{'всё сошлось' if not bad else str(bad) + ' не сошлось'}")
+    print(f"\n{'all passed' if not bad else str(bad) + ' failed'}")
     sys.exit(1 if bad else 0)
 
 
