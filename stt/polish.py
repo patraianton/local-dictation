@@ -10,6 +10,7 @@ them as they are. Translating them would invalidate all of it.
 """
 import difflib
 import re
+import threading
 import time
 
 import httpx
@@ -343,6 +344,8 @@ class Polisher:
         self.available = False
         self.reason = "not checked yet"
         self._next_check = 0.0  # do not hammer a dead LM Studio on every take
+        self._probing = False   # a background re-check is already in flight
+        self.on_status = None   # optional: called when availability changes
         self._client = httpx.Client(timeout=self.timeout)
 
     @property
@@ -451,6 +454,35 @@ class Polisher:
             pass
         return time.perf_counter() - t0
 
+    def probe_soon(self) -> None:
+        """Re-checks LM Studio in the background, never on the dictation path.
+
+        Reaching a dead LM Studio is not free: a refused connection to
+        localhost costs a full 2.0 s on this machine (measured 2026-08-20 on
+        five different closed ports). Paying that while the person waits for
+        their text made every first take after a 30-second pause 2.1 s instead
+        of 0.15 s. So the check moved off the hot path: the take pastes raw
+        text at once, and the corrector comes back by itself on the next one.
+        """
+        if self._probing or not self.enabled:
+            return
+        if time.time() < self._next_check:
+            return
+        self._probing = True
+
+        def run() -> None:
+            try:
+                if self.check(force=True):
+                    self.warmup()
+                    if self.on_status:
+                        self.on_status(True, self.model)
+            except Exception:
+                pass
+            finally:
+                self._probing = False
+
+        threading.Thread(target=run, daemon=True).start()
+
     def polish(self, raw: str) -> tuple[str, float, str]:
         """(text, seconds, what happened). Returns raw on any hiccup."""
         if not raw.strip():
@@ -461,7 +493,8 @@ class Polisher:
         # config.toml, [polish] min_words, for why that turned out to be wrong.
         if len(raw.split()) < self.min_words:
             return raw, 0.0, "too short, skipped"
-        if not self.available and not self.check():
+        if not self.available:
+            self.probe_soon()
             return raw, 0.0, self.reason
 
         t0 = time.perf_counter()

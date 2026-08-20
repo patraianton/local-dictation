@@ -95,6 +95,15 @@ class Dictation:
         warm = self.asr.warmup()
         log(f"warmup: {warm:.2f} s")
 
+        # When LM Studio is started later, the background probe notices it and
+        # says so — otherwise the corrector would quietly come back and Anton
+        # would have no idea when.
+        def corrector_back(_ok: bool, model: str) -> None:
+            log(f"corrector is back: {model}")
+            self.hud.set("ok", "corrector on", hide_after=2.0)
+
+        self.polisher.on_status = corrector_back
+
         if self.polisher.check():
             warm = self.polisher.warmup()
             log(f"corrector: {self.polisher.model} (loaded in {warm:.1f} s)")
