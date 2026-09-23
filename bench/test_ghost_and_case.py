@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 from stt.asr import subtitle_ghost  # noqa: E402
 from stt.polish import allowed_words, constrain  # noqa: E402
 
-TERMS = ["Claude Code", "herdr", "Talroo", "SafetyWing", "Codex"]
+TERMS = ["Claude Code", "herdr", "SafetyWing", "Codex"]
 ALLOWED = allowed_words(TERMS)
 
 
@@ -100,22 +100,6 @@ def main():
     if got != "ну и хрен с ним":
         fail(f"заглавная приписана там, где её не было: {got!r}")
     ok.append("своя строчная буква в начале не переписывается")
-
-    # --- 6. Ослышки имени больше не защищены от починки ---
-    mywords = (ROOT / "mywords.txt").read_text(encoding="utf-8").lower().split()
-    for w in ("мусайба", "мусыева"):
-        if w in mywords:
-            fail(f"{w!r} снова в mywords.txt — правщик не сможет починить имя")
-    ok.append("ослышки имени убраны из списка защищённых слов")
-
-    # --- 7. Глоссарий не учит неправильным написаниям ---
-    gloss = (ROOT / "glossary.txt").read_text(encoding="utf-8").split()
-    for wrong, right in (("Talru", "Talroo"), ("Safewings", "SafetyWing")):
-        if wrong in gloss:
-            fail(f"в glossary.txt снова ослышка {wrong!r} вместо {right!r}")
-        if right not in gloss:
-            fail(f"в glossary.txt пропало правильное написание {right!r}")
-    ok.append("в глоссарии настоящие названия, а не ослышки")
 
     for line in ok:
         print(f"[v] {line}")

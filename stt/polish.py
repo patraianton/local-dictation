@@ -264,8 +264,8 @@ def constrain(
             # worst, on 2026-08-20: "Там Bitrix, GoHighLevel и так далее" was
             # pasted as "Там Bitrix, GoHighLevel, Salesforce, HubSpot,
             # Pipedrive, Zoho, и так далее" — four systems the owner never
-            # named, written into a CV he was dictating. A term the corrector
-            # splits into two words ("кидни пас" -> "Kidney Pass") is not this
+            # named, written into a document he was dictating. A term the corrector
+            # splits into two words ("акме пас" -> "Acme Pass") is not this
             # case: that is a replace, and it still goes through.
             #
             # An invented word usually brought a comma with it: "я новую сессию
