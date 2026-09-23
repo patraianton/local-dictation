@@ -6,7 +6,7 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
-LM_MODELS = Path(r"C:\Users\panto\.lmstudio\models")
+LM_MODELS = Path.home() / ".lmstudio" / "models"
 
 WANTED = [
     ("lmstudio-community/Qwen3-4B-Instruct-2507-GGUF", "Qwen3-4B-Instruct-2507-Q6_K.gguf"),

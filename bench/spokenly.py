@@ -11,7 +11,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-HISTORY = Path(r"C:\Users\panto\AppData\Roaming\Spokenly\History")
+HISTORY = Path.home() / "AppData" / "Roaming" / "Spokenly" / "History"
 
 
 def records() -> list[dict]:
