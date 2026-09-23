@@ -11,3 +11,4 @@ pyperclip>=1.9
 pymorphy3>=2.0
 # Per-application volume on Windows: ducks other audio while you speak.
 pycaw>=20240210
+pynput>=1.7
