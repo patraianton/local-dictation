@@ -130,7 +130,6 @@ model = "large-v3-turbo"
 # picked large-v3 in 32 takes and turbo in 14 (the rest were the same words).
 # What it fixes is exactly what had to be re-dictated that day:
 #   Чиньёба цикета            -> Чинь оба тикета
-#   Плесня, какова хуя        -> Подписка, какого хуя?
 #   Вочисть его, конечно      -> Очисти его, конечно
 #   Пластический клиент       -> Платящий клиент
 #   Аксим / Версара / лавиш   -> Максим / Vercel / Lavish

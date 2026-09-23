@@ -241,7 +241,7 @@ class Dictation:
                 aliases=termstats.aliases_from_fixes(self.fixes),
                 days=int(self.cfg.get("asr", {}).get("prompt_days", 14)),
                 # A term that is also an ordinary Russian word cannot be
-                # counted: "Это" is a colleague and the word "this" at once.
+                # counted: "Роман" is a name and the word "novel" at once.
                 skip=self.mywords,
             )
         except Exception as exc:
@@ -1181,8 +1181,8 @@ def cmd_learnwords(min_count: int = 3) -> None:
 
     min_count was 1 until 29.08.2026, so a single mishearing became a protected
     word for good — and a protected word is one the corrector is forbidden to
-    fix. That is how "мусайба" and "мусыева" got into the list: both are the
-    name "Даниил" misheard once each, and their presence there was the reason
+    fix. That is how two one-off mishearings of a colleague's name got into
+    the list, and their presence there was the reason
     the corrector could not put the name right afterwards. The program had
     locked itself out of repairing its own mistake. Three sightings is the
     threshold for calling something a word of yours rather than a slip.

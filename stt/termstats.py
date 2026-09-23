@@ -106,7 +106,7 @@ def rank(terms: list[str], log_dir: Path, aliases: dict | None = None,
 
     aliases: {term: {how it gets misheard, ...}} — usually built from fixes.tsv.
     skip:    terms whose count cannot be trusted because the word is also an
-             ordinary Russian word ("Это" is a colleague AND the word "this",
+             ordinary Russian word ("Роман" is a name AND the word "novel",
              and no counting can tell them apart). They keep file order at the
              back rather than crowding out real terms.
     """

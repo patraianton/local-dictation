@@ -129,7 +129,7 @@ class Asr:
         # the 115 where the two models disagreed, twelve blind judges preferred
         # large-v3 in 32 takes against turbo's 14 — and the ones it fixed are
         # exactly the ones that had to be re-dictated: "Чиньёба цикета" ->
-        # "Чинь оба тикета", "Плесня, какова хуя" -> "Подписка, какого хуя?",
+        # "Чинь оба тикета",
         # "Аксим" -> "Максим", "Версара" -> "Vercel", "лавиш" -> "Lavish".
         # On long takes it is the other way round, and four times slower, so
         # the switch is by length. "" turns it off.

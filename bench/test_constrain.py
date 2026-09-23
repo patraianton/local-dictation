@@ -22,10 +22,10 @@ CASES = [
         "do not change words, and do not drop the leading conjunction",
     ),
     (
-        "Что за хуйня, только что 8 окон github.exe открылось.",
-        "Что за хуёня, только что 8 окон GitHub.exe открылось.",
-        "Что за хуйня, только что 8 окон GitHub.exe открылось.",
-        "keep the profanity intact, but take GitHub capitalized",
+        "Что за фигня, только что 8 окон github.exe открылось.",
+        "Что за фиговня, только что 8 окон GitHub.exe открылось.",
+        "Что за фигня, только что 8 окон GitHub.exe открылось.",
+        "keep the slang intact, but take GitHub capitalized",
     ),
     (
         "Спланируй новых статей и ссылок на акме паса, причем на главную.",
@@ -56,7 +56,7 @@ CASES = [
         "Там Bitrix, GoHighLevel и так далее.",
         "Там Bitrix, GoHighLevel, Salesforce, HubSpot, Pipedrive, Zoho, и так далее.",
         "Там Bitrix, GoHighLevel и так далее.",
-        "glossary terms the speaker never said are not written into his CV",
+        "glossary terms the speaker never said are not written into the text",
     ),
     (
         "А, и у меня был handover для запуска.",
@@ -66,7 +66,7 @@ CASES = [
     ),
     (
         "Моя задача получить митинги для клиента для медмаркета компании.",
-        "Моя задача — получить митинги для клиента, для China Cars marketplace компании.",
+        "Моя задача — получить митинги для клиента, для Acme Motors marketplace компании.",
         "Моя задача — получить митинги для клиента, для медмаркета компании.",
         "an invented term does not get through",
     ),
