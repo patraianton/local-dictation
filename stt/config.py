@@ -14,6 +14,7 @@ CANDIDATES_PATH = ROOT / "state" / "candidates.json"
 # gets killed mid-recording, the next start reads this file and gives the sound
 # back.
 DUCK_STATE_PATH = ROOT / "state" / "duck.json"
+MICGAIN_STATE_PATH = ROOT / "state" / "micgain.json"
 LOG_DIR = ROOT / "logs"
 REC_DIR = ROOT / "recordings"
 

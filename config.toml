@@ -24,6 +24,88 @@ max_seconds = 300
 # Part of the microphone name. Empty = the Windows default microphone.
 name = "PodMic"
 samplerate = 16000
+# Where to take the sound from.
+# "raw"    — straight off the device (WDM-KS), past every Windows "enhancement".
+#            The PodMic's capture endpoint carries a processing pack installed
+#            with RODE Central; measured on 2026-08-23 it was eating twelve
+#            decibels and every pause, and it adapts during a long phrase (a
+#            29-second take slid from 0.10 to 0.02 while it was being spoken,
+#            which is why repeating the same sentence came out right). The raw
+#            path is exclusive: while dictation holds the mic, nothing else can
+#            record — see hot_ms.
+# "shared" — the old way, through the Windows mixer. Other programs can record
+#            at the same time, and the sound comes back processed.
+path = "raw"
+# How long to keep holding the microphone after a take, in milliseconds.
+# Opening it costs 105 ms, and people start talking as they press: between 26%
+# and 42% of takes used to begin with the first syllable already missing
+# ("Читайся" for "Отчитайся"). While it is held, the sound from before the key
+# press is kept, so nothing is lost. 0 = let go at once (then other programs
+# can always record, but first syllables go back to being cut).
+#
+# Was 60000 until 29.08.2026. Measured over 2206 takes from the 20th to the
+# 29th: 68% of them carried no pre-roll at all, and those had to be re-dictated
+# or were marked bad three times as often (2.19% against 0.72%). Of the takes
+# that came less than a minute after the previous one — where this timer had
+# not run out yet — 47% still arrived empty, because the microphone was being
+# let go on every window switch (see yield_to below). Half an hour covers a
+# normal working gap; the mic is still handed over at once to the programs in
+# yield_to.
+hot_ms = 1800000
+
+# Programs that get the microphone back the moment their window comes to the
+# front. Everything else waits: while dictation holds the mic on the raw path
+# nothing else can record, and that hold is exactly what keeps the pre-roll
+# full.
+# Browsers are deliberately absent — dictation goes into a browser all day, and
+# adding one would bring back the empty pre-roll and the chewed-off first half
+# of the phrase. If you take calls in a browser tab, add "chrome.exe" here and
+# accept that cost, or press the dictation key once before speaking in the call
+# (releasing it hands the microphone over).
+yield_to = ["Zoom.exe", "Teams.exe", "ms-teams.exe", "Skype.exe", "Discord.exe",
+            "Telegram.exe", "Webex.exe", "WebexHost.exe", "obs64.exe",
+            "Audacity.exe", "slack.exe"]
+# Standing in front is no longer enough to take the microphone: the program has
+# to be recording, or plausibly about to. Measured on 31.08.2026 — Slack had
+# not recorded a second since 13.08 and Telegram one minute all day, yet
+# between them they were taking the mic away all day long, and a third of the
+# takes started with an empty pre-roll, i.e. with the first syllable gone.
+#
+# Our capture is exclusive, so a program cannot just take the microphone when
+# it needs it — it has to be given a gap. So when a listed program comes to the
+# front it gets the microphone free for yield_probe_s, and while it stays in
+# front that chance comes round every yield_probe_every_s. Start a call and
+# Windows marks it as recording, and the microphone stays free for the whole
+# call plus yield_grace_s (a mute or a screen share closes the stream for a
+# moment and must not count as the end). Ignore the microphone and dictation
+# takes it straight back, pre-roll and all.
+yield_probe_s = 2.5
+yield_probe_every_s = 25.0
+yield_grace_s = 120.0
+# A program that really has recorded on this machine within yield_known_s gets
+# its chance this often instead — a call must not wait half a minute to start.
+# Zoom qualifies (a call on 31.08 at 19:01); Slack does not (nothing since
+# 13.08), and neither does Telegram (one minute in a whole day).
+yield_probe_hot_every_s = 4.0
+yield_known_s = 86400.0
+# How much sound from before the key press to keep, in milliseconds.
+preroll_ms = 500
+
+# The microphone's own gain — the Windows "level" slider. On the PodMic USB it
+# is the preamp inside the microphone, 22..63 dB, and any program built on
+# WebRTC (Chrome, Zoom, Telegram) moves it and leaves it moved. On 21.08.2026 it
+# was pushed to 63 dB and the takes crackled with clipping; by 23.08 it sat at
+# 42.8 dB and speech peaked at a tenth of full scale. Both days looked like a
+# broken microphone and were nothing of the kind.
+# true = dictation holds the level itself and tunes it after every take.
+keep_gain = true
+# What a take should peak at. 0.5 leaves room for a shout without clipping.
+target_peak = 0.5
+# Never leave these, whatever the tuning says. 63 dB is where 21.08 clipped.
+min_db = 34.0
+max_db = 58.0
+# The largest change after a single take.
+max_step_db = 6.0
 # How long to keep recording AFTER the key is released. People release the key
 # while still finishing the last word, and that word was being lost: a
 # measurement on 2026-08-15 found 47% of takes cut off mid-sound, without a
@@ -38,6 +120,27 @@ tail_quiet_ms = 120
 # large-v3-turbo: on this voice it was both 4x faster and more accurate than
 # large-v3. Put "large-v3" here if you want to compare.
 model = "large-v3-turbo"
+# A second model, for SHORT takes only. One or two seconds is where turbo
+# breaks: there is nothing around the words to lean on, so it guesses, and a
+# guess on a three-word order means saying it again.
+#
+# Measured 10.09.2026 over 258 short takes from the previous six days. The two
+# models wrote different text on 115 of them; twelve judges, told only "which
+# of these two is what a person actually said" and not which model was which,
+# picked large-v3 in 32 takes and turbo in 14 (the rest were the same words).
+# What it fixes is exactly what had to be re-dictated that day:
+#   Чиньёба цикета            -> Чинь оба тикета
+#   Плесня, какова хуя        -> Подписка, какого хуя?
+#   Вочисть его, конечно      -> Очисти его, конечно
+#   Пластический клиент       -> Платящий клиент
+#   Архан / Версара / лавиш   -> Орхан / Vercel / Lavish
+# On LONG takes it is the other way round and four times slower (1.15 s
+# against 0.27 s), so the switch is by length, not for everything.
+# Costs 3 GB of video memory and 4 seconds at start-up. Empty = off.
+short_model = "large-v3"
+# Takes up to this many seconds go to that model. Above it, turbo.
+# At three seconds this is about a quarter of all takes and adds 0.35 s to them.
+short_seconds = 3.0
 device = "cuda"
 compute_type = "float16"
 language = "ru"
@@ -54,20 +157,27 @@ prompt_terms = 45
 prompt_style = "commands"
 
 [polish]
-# Tidying the text with a second model through LM Studio.
+# Tidying the text with a second model through LM Studio (OpenAI-compatible API).
+# The big Qwen3.8-27B on :8099 is a night-only thing for the article conveyor and is
+# not used here (operator's call, 2026-08-21). Any other server would work too:
+# url + api_key_file below; measured on :8099 that day - 0.4-1.0 s a take.
 enabled = true
 url = "http://127.0.0.1:1234"
+# Bearer key the server wants; a path to a file holding it. Empty = no key.
+api_key_file = ""
 # Measured on real takes: 0.35 s per line, holds 18 GB of VRAM (only 3 of its
 # 30 billion parameters are active at a time, which is why it is fast).
 # It restores question marks noticeably better than a small model: 6 of 7
 # against 4 of 7, at the cost of one false mark per 7 statements.
 # Lighter and safer: "qwen3-4b-instruct-2507" — 3 GB, same speed, no false
 # marks at all, but it catches fewer questions.
-# Empty = use whatever model is currently loaded in LM Studio. Handy while you
-# are switching models: load a new one and dictation picks it up by itself.
-# To pin a specific one, choose it on the Model tab of the page; the name is
-# written here automatically.
-model = ""
+# Empty = use whatever model is IN MEMORY in LM Studio right now. Dictation
+# never loads a model itself and never keeps one alive: the model in VRAM
+# belongs to whoever put it there. Swap it and dictation follows within twenty
+# seconds; unload everything and dictation simply pastes the raw text.
+# A name written here is only a preference — if that model is not in memory,
+# the loaded one wins. To pin one, choose it on the Model tab of the page.
+model = "qwen3-4b-instruct-2507"
 # "light"  — punctuation, capitals and terms only. Your words are untouched.
 # "clean"  — also removes fillers, repeats and slips. Smoother text, but that is
 #            editing your speech.
@@ -81,9 +191,40 @@ timeout_s = 4.0
 # wild on short input is handled by the lock in polish.py::constrain, which
 # rolls back anything extra.
 min_words = 1
-# How many seconds LM Studio keeps the model in VRAM after the last request.
-# Otherwise the first take after a break waits ~2 seconds for it to load.
-keep_loaded_s = 3600
+# Who decides the question marks.
+# "heard"     — the recognizer does: the corrector may move a mark between
+#               sentences but never add one that was not heard. Since 20.08.2026,
+#               after it invented 5 wrong marks out of 7 in five days ("а это
+#               где-то внизу закопано?" on a plain statement, and once a mark in
+#               the middle of a sentence, splitting it in two).
+# "corrector" — the old way: it may restore a question the recognizer missed.
+#               Catches 36 questions out of 43 instead of 33, and pays with
+#               marks it made up. ctrl+f13 puts a missing mark back by hand.
+#
+# Since 22.08.2026 a mark the recognizer DID hear is never removed, not even on
+# a phrase shaped as an order. Until then "Посмотри, с чем связано ухудшение?"
+# came back as a full stop. Across twelve days of logs the recognizer put a "?"
+# on an order-shaped phrase 37 times and all 37 were real questions, so the
+# rule was only ever destroying them.
+questions = "heard"
+# Ask the recognizer a second time, differently: which ending fits the
+# recording better, "." or "?". It writes the mark in one pass and never looks
+# back, so a question asked without a question word ("Мы ссылки сделали на эти
+# статьи?") comes out as a statement — and 14 of the 24 questions lost over
+# 08-10.09.2026 were exactly that kind. Runs only when neither the recognizer
+# nor the corrector found a question, and costs 60 ms on those takes.
+sound_questions = true
+# How much more the sound must look like a question than like a statement.
+# Measured over those three days (421 takes, 148 of them real questions):
+#   off    124 questions delivered of 148, 12 marks on statements
+#   -1.0   129 of 148, still 12  <- chosen: five saved, nothing broken
+#   -1.5   132 of 148, 13
+#   -2.0   134 of 148, 14
+#   -3.0   136 of 148, 15
+# Lower it if a lost question annoys more than a stray mark. Note that a mark
+# on an order makes an agent ask back instead of working, which is why the
+# safe end was taken.
+sound_threshold = -1.0
 # If the result differs in length by more than this factor, the model has run
 # off the rails and the raw recognition is used instead.
 max_growth = 1.6
@@ -148,3 +289,15 @@ open_on_start = false
 enabled = true
 size = 16
 margin = 28
+
+[handsfree]
+# One press starts recording, the next stops it — nothing to hold.
+# Written by `run.ps1 bindtoggle`.
+# 28.08.2026: unbound at Anton's request - it stole the Print Screen key and
+# screenshots stopped working. Tapping f13 still toggles hands-free.
+enabled = false
+key = ""
+button = ""
+# Swallow the key so Windows does not also do its usual job with it.
+# Print Screen without this opens the Snipping Tool on every recording.
+suppress = true

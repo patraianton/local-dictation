@@ -19,6 +19,26 @@ def log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
+def _com_wake() -> bool:
+    """Wakes the Windows audio API on this thread. True if we were the ones."""
+    try:
+        import comtypes
+
+        comtypes.CoInitialize()
+        return True
+    except Exception:
+        return False
+
+
+def _com_sleep() -> None:
+    try:
+        import comtypes
+
+        comtypes.CoUninitialize()
+    except Exception:
+        pass
+
+
 class Session:
     """One audio source. A wrapper so the Windows part can be faked in tests."""
 
@@ -116,14 +136,24 @@ class Ducker:
         self._write_state({})
 
     def _apply(self) -> None:
-        with self._lock:
-            try:
-                if self._want and not self.saved:
-                    self._do_duck()
-                elif not self._want and self.saved:
-                    self._do_restore()
-            except Exception as exc:
-                log(f"could not duck/restore audio: {type(exc).__name__}: {exc}")
+        # Every take runs this on a brand-new thread, and the Windows audio API
+        # has to be woken up separately on each one. It used to work by luck —
+        # some other part of the program happened to have woken it first — and
+        # on 2026-08-23, when that part changed, every single take started
+        # logging "CoInitialize has not been called" and nothing was ducked.
+        started = _com_wake()
+        try:
+            with self._lock:
+                try:
+                    if self._want and not self.saved:
+                        self._do_duck()
+                    elif not self._want and self.saved:
+                        self._do_restore()
+                except Exception as exc:
+                    log(f"could not duck/restore audio: {type(exc).__name__}: {exc}")
+        finally:
+            if started:
+                _com_sleep()
 
     # ---------- public ----------
     def duck(self) -> None:

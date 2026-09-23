@@ -43,6 +43,7 @@ def feeder(rec: Recorder, plan, stop_flag):
                      ).astype(np.float32)
             with rec._lock:
                 rec._chunks.append(block)
+                rec._held += len(block)
             time.sleep(0.02)
 
 
@@ -51,6 +52,7 @@ def run(plan, tail_ms, quiet_ms=120):
     rec = Recorder(devices=[None], samplerate=SR)
     rec._stream = FakeStream()
     rec._open_sr, rec._open_ch = SR, 1
+    rec._armed = True                           # такт идёт: клавиша нажата
     stop_flag = [False]
     th = threading.Thread(target=feeder, args=(rec, plan, stop_flag), daemon=True)
     th.start()
@@ -89,6 +91,7 @@ def main() -> None:
     rec = Recorder(devices=[None], samplerate=SR)
     rec._stream = FakeStream()
     rec._open_sr, rec._open_ch = SR, 1
+    rec._armed = True                           # такт идёт: клавиша нажата
     flag = [False]
     threading.Thread(target=feeder, args=(rec, plan, flag), daemon=True).start()
     time.sleep(0.30)

@@ -27,6 +27,10 @@ from . import endings  # noqa: E402
 from .fixes import Fixes  # noqa: E402
 from .hud import Hud  # noqa: E402
 from .learn import Learner  # noqa: E402
+from . import miclisteners as listeners_mod  # noqa: E402
+from . import micgain as micgain_mod  # noqa: E402
+from . import termstats  # noqa: E402
+from . import paste as paste_mod  # noqa: E402
 from .paste import paste_text  # noqa: E402
 from .polish import Polisher  # noqa: E402
 
@@ -45,11 +49,15 @@ class Dictation:
         self.terms = cfg_mod.glossary()
         self.fixes = Fixes(cfg_mod.FIXES_PATH)
         self.mywords = cfg_mod.mywords()
+        # The order the recognizer's hint is cut from: what is actually being
+        # talked about, not the order the file happens to be in. See
+        # termstats.py — the whole list still goes to the corrector.
+        self.hint_terms = self._rank_terms()
         self.fix_endings = bool(self.cfg.get("endings", {}).get("enabled", True))
         self.polisher = Polisher(self.cfg, self.terms, self.fixes, self.mywords)
         self.learner = Learner(
             self.cfg, self.fixes, cfg_mod.LOG_DIR, cfg_mod.REC_DIR,
-            cfg_mod.CANDIDATES_PATH,
+            cfg_mod.CANDIDATES_PATH, self.terms,
         )
         self.ducker = ducking.Ducker(self.cfg, cfg_mod.DUCK_STATE_PATH)
         self.hud = Hud(self.cfg)
@@ -64,12 +72,61 @@ class Dictation:
         self.tail_s = float(mic_cfg.get("tail_ms", 400)) / 1000.0
         self.tail_quiet_ms = int(mic_cfg.get("tail_quiet_ms", 120))
 
-        self.devices = audio_mod.find_devices(self.cfg["mic"].get("name", ""))
-        self.device = self.devices[0]
-        self.recorder = audio_mod.Recorder(
-            self.devices, int(self.cfg["mic"]["samplerate"])
+        self.mic_path = str(mic_cfg.get("path", "raw"))
+        self.devices = audio_mod.find_devices(
+            self.cfg["mic"].get("name", ""), self.mic_path
         )
+        self.device = self.devices[0]
+        self.preroll_s = float(mic_cfg.get("preroll_ms", 500)) / 1000.0
+        mic_name = self.cfg["mic"].get("name", "")
+        self.recorder = audio_mod.Recorder(
+            self.devices,
+            int(self.cfg["mic"]["samplerate"]),
+            preroll_s=self.preroll_s,
+            hot_s=float(mic_cfg.get("hot_ms", 20000)) / 1000.0,
+            # Re-plug the microphone and it is found again by name, not by
+            # the index it had before (04.09.2026).
+            finder=lambda: audio_mod.find_devices(mic_name, self.mic_path),
+            named=bool(mic_name.strip()),
+        )
+        self.recorder.log = log
+        self.gain = micgain_mod.MicGain(
+            self.cfg["mic"].get("name", ""), self.cfg,
+            cfg_mod.MICGAIN_STATE_PATH, log,
+        )
+        # Putting back a question mark from the voice — see ask_the_sound.
+        pol_cfg = self.cfg.get("polish", {})
+        self.sound_questions = bool(pol_cfg.get("sound_questions", True))
+        self.sound_threshold = float(pol_cfg.get("sound_threshold", -1.0))
+        self.last_sound_q = None
         self.mic_cooldown = 0.0
+        # Which window the last take went into. Kept for the paste path only.
+        self.hot_window = ""
+        # Programs that get the microphone handed back the moment their window
+        # comes to the front. Everything else may wait: holding the mic open is
+        # what keeps the pre-roll full, and the pre-roll is what saves the first
+        # syllable of a phrase.
+        self.yield_to = {
+            str(x).strip().lower()
+            for x in mic_cfg.get("yield_to", []) if str(x).strip()
+        }
+        # How long a program from that list is given to actually start
+        # recording once its window comes to the front, and how often that
+        # chance comes round again while it stays in front. See _may_hold_mic.
+        self.yield_probe_s = float(mic_cfg.get("yield_probe_s", 2.5))
+        self.yield_probe_every_s = float(mic_cfg.get("yield_probe_every_s", 25.0))
+        # A program that really does record on this machine gets its chance far
+        # more often, so a call never waits half a minute to start.
+        self.yield_probe_hot_every_s = float(
+            mic_cfg.get("yield_probe_hot_every_s", 4.0))
+        self.yield_known_s = float(mic_cfg.get("yield_known_s", 86400.0))
+        # A call is still a call across a mute or a screen share, both of which
+        # close the capture stream for a moment.
+        self.yield_grace_s = float(mic_cfg.get("yield_grace_s", 120.0))
+        self._front_exe = ""
+        self._front_since = 0.0
+        self._probe_until = 0.0
+        self.recorder.should_hold = self._may_hold_mic
 
         self.asr = None
         self.recording = False
@@ -78,6 +135,7 @@ class Dictation:
         self.busy = threading.Lock()
         self.last: dict = {}
         self.mouse_hook = None
+        self.toggle_hook = None
 
     # ---------- startup ----------
     def boot(self) -> None:
@@ -87,11 +145,27 @@ class Dictation:
         mic_name = "default"
         if self.device is not None:
             mic_name = audio_mod.sd.query_devices(self.device)["name"]
-        log(f"microphone: {mic_name}")
+        log(f"microphone: {mic_name} [{audio_mod.api_of(self.device)}]")
 
-        self.asr = Asr(self.cfg, self.terms)
+        self.gain.open()
+        log(micgain_mod.describe(self.gain))
+        self.gain.start()
+
+        if self.recorder.warm():
+            log(f"microphone held open, {self.recorder.hot_s:.0f} s after a take "
+                f"(the first {self.preroll_s*1000:.0f} ms of a phrase are kept)")
+        elif self.recorder.hot_s > 0:
+            log(f"could not hold the microphone open: {self.recorder.last_error}")
+
+        self.asr = Asr(self.cfg, self.hint_terms)
         took = self.asr.load()
         log(f"recognizer {self.asr.model_name} on {self.asr.device}: {took:.1f} s")
+        if self.asr.short is not None:
+            log(f"short takes (up to {self.asr.short_seconds:.0f} s) go to "
+                f"{self.asr.short_model_name} — it hears a one-word command better")
+        elif self.asr.short_model_name:
+            log(f"the second model {self.asr.short_model_name} did not load — "
+                f"short takes go to {self.asr.model_name} as before")
         warm = self.asr.warmup()
         log(f"warmup: {warm:.2f} s")
 
@@ -111,7 +185,19 @@ class Dictation:
             log(f"corrector OFF — {self.polisher.reason}")
             log("  (dictation works without it; the text comes out raw)")
 
-        log(f"replacements: {len(self.fixes)} pairs, terms in the hint: {len(self.terms)}")
+        hint_size = int(self.cfg.get("asr", {}).get("prompt_terms", 45))
+        log(f"replacements: {len(self.fixes)} pairs, "
+            f"{len(self.terms)} terms known, {min(hint_size, len(self.hint_terms))} "
+            f"of them in the recognizer's hint")
+        log("  hint starts with: " + ", ".join(self.hint_terms[:10]))
+        # A pair the dictionary would refuse today but that is sitting in the
+        # file anyway: it was hand-written, or it survives from an older
+        # version. It still works — load() does not filter — so the only way it
+        # is ever noticed is here. Right now there are none, which is what makes
+        # any future line worth reading.
+        suspect = self.fixes.suspect_pairs()
+        for src, dst, why in suspect:
+            log(f"  WATCH: replacement {src!r} -> {dst!r} would be refused today ({why})")
         web = self.cfg.get("web", {})
         if web.get("enabled", True):
             from . import server
@@ -143,6 +229,25 @@ class Dictation:
         if self.flip_hotkey:
             log(f"Full stop <-> question mark: {self.flip_hotkey}.")
 
+    def _rank_terms(self) -> list[str]:
+        """The glossary in "how often it is really said" order.
+
+        Never fatal: a missing log folder, an unreadable file, anything at all
+        and the file's own order is used, exactly as before.
+        """
+        try:
+            return termstats.rank(
+                self.terms, cfg_mod.LOG_DIR,
+                aliases=termstats.aliases_from_fixes(self.fixes),
+                days=int(self.cfg.get("asr", {}).get("prompt_days", 14)),
+                # A term that is also an ordinary Russian word cannot be
+                # counted: "Это" is a colleague and the word "this" at once.
+                skip=self.mywords,
+            )
+        except Exception as exc:
+            log(f"could not rank the terms ({exc}) — using the file order")
+            return list(self.terms)
+
     def reload_terms(self) -> None:
         """Re-reads the terms live, with no restart.
 
@@ -154,16 +259,19 @@ class Dictation:
 
         self.terms = cfg_mod.glossary()
         self.mywords = cfg_mod.mywords()
+        self.hint_terms = self._rank_terms()
         if self.asr is not None:
             a = self.cfg["asr"]
             self.asr.prompt = build_prompt(
-                self.terms, int(a.get("prompt_terms", 45)),
+                self.hint_terms, int(a.get("prompt_terms", 45)),
                 a.get("prompt_style", "list"),
             )
         self.polisher.terms = self.terms
         self.polisher.allowed = allowed_words(self.terms, self.fixes)
         self.polisher.protected = self.mywords
-        log(f"terms reloaded: {len(self.terms)}")
+        self.learner.terms = {t.strip().lower() for t in self.terms if t.strip()}
+        log(f"terms reloaded: {len(self.terms)}; "
+            f"hint: {', '.join(self.hint_terms[:6])}...")
 
     def _keep_warm(self) -> None:
         """Keeps the corrector resident in VRAM.
@@ -199,6 +307,35 @@ class Dictation:
                 )
             except Exception as exc:
                 log(f"the mark key {self.flip_hotkey} did not bind: {exc}")
+
+        hf = self.cfg.get("handsfree", {})
+        if hf.get("enabled", True) and (hf.get("key") or hf.get("button")):
+            if hf.get("key"):
+                try:
+                    # Swallowed when asked, because the key a mouse button sends
+                    # usually still has its own job in Windows. Print Screen is
+                    # the case that made this necessary: unswallowed, every
+                    # start of a recording also opened the Snipping Tool.
+                    quiet = bool(hf.get("suppress", False))
+                    keyboard.add_hotkey(hf["key"], self.on_toggle, suppress=quiet)
+                    mode = "intercepted" if quiet else "not intercepted"
+                    log(f"start/stop without holding: key {hf['key']} ({mode})")
+                except Exception as exc:
+                    log(f"key {hf['key']} did not bind: {exc}")
+            if hf.get("button"):
+                from . import mousehook
+
+                self.toggle_hook = mousehook.Hook(
+                    hf["button"], self.on_toggle, bool(hf.get("suppress", False))
+                )
+                try:
+                    if self.toggle_hook.start():
+                        log(f"start/stop without holding: mouse "
+                            f"({self.toggle_hook.names})")
+                    else:
+                        log(f"mouse buttons {hf['button']!r} not recognized")
+                except Exception as exc:
+                    log(f"the mouse hook failed: {exc}")
 
         rp = self.cfg.get("repaste", {})
         if not rp.get("enabled", True):
@@ -243,6 +380,20 @@ class Dictation:
         else:
             self.stop_and_process()
 
+    def on_toggle(self, _event=None) -> None:
+        """One press starts recording, the next stops it. No holding anything.
+
+        The same hands-free mode the main key gives on a short tap, but on its
+        own button — a mouse button is pressed and released in a few
+        milliseconds, so "hold to speak" is not a thing there.
+        """
+        if self.recording:
+            self.stop_and_process()
+            return
+        self.start()
+        self.locked = True
+        self.hud.set("lock", "hands-free")
+
     def on_esc(self, _event=None) -> None:
         if self.recording:
             self.recording = self.locked = False
@@ -276,7 +427,7 @@ class Dictation:
             float(self.cfg["paste"].get("restore_clipboard_after_s", 1.0)),
         )
         self.hud.set("ok", "pasted", hide_after=1.0)
-        log(f"pasted again into window: {title[:60]!r}")
+        log(f"pasted again into window: {title[:60]!r} ({paste_mod.last_route})")
 
     def on_flip_question(self) -> None:
         """Flips the final mark of the last take: full stop <-> question mark.
@@ -297,8 +448,6 @@ class Dictation:
             self.hud.set("warn", "nothing to fix", hide_after=1.2)
             return
 
-        import keyboard
-
         from .polish import flip_question
 
         new_text, erase, want = flip_question(text)
@@ -306,10 +455,7 @@ class Dictation:
 
         # fix the already pasted text: erase the wrong mark, type the right one
         try:
-            for _ in range(erase):
-                keyboard.send("backspace")
-                time.sleep(0.02)
-            keyboard.write(want)
+            paste_mod.erase_and_type(erase, want)
         except Exception as exc:
             log(f"could not fix it in the window: {exc}")
 
@@ -362,6 +508,98 @@ class Dictation:
         self.hud.set("rec", "")
         threading.Thread(target=self._watchdog, daemon=True).start()
 
+    def _may_hold_mic(self) -> bool:
+        """Whether to keep holding the microphone between takes.
+
+        Until 2026-08-29 this asked a different question: "is Anton still in
+        the window the last take was pasted into?" — and let the microphone go
+        the moment he was not. He almost never is: you dictate into one window
+        and walk to the next. So the stream was closed within 250 ms of nearly
+        every take, and the next key press opened it from cold — which costs
+        about 105 ms of dead air AND starts with an empty pre-roll ring, so the
+        half-second before the key press was simply not there.
+
+        Measured over 2206 takes from 20.08 to 29.08.2026: 68% of them carried
+        no pre-roll at all (the figure is bimodal — either the full 0.5 s or
+        exactly zero, nothing between), and among those the take had to be
+        re-dictated or was marked bad three times as often: 2.19% against 0.72%.
+        Even with less than a minute since the previous take — when the timer
+        still had the stream open — 47% arrived with nothing, because this veto
+        had already closed it.
+
+        Now the microphone is only handed back to programs that actually want
+        it, listed in [mic] yield_to. Note that browsers are deliberately NOT
+        on that list: dictation goes into a browser all day, and putting one
+        there would bring back the empty pre-roll. A call inside a browser tab
+        therefore needs the dictation key pressed once (which frees the mic on
+        release) or chrome.exe added to yield_to by hand.
+
+        And since 31.08.2026 being in that list is no longer enough: the
+        program must be recording, or plausibly about to. Anton keeps Slack and
+        Telegram in front of him all day and dictates into them — and they were
+        taking the microphone away every time, purely for standing in front.
+        Measured over 31.08: Slack had not recorded a single second since
+        13.08, Telegram one minute at 09:51, yet 36 of the day's takes (21%)
+        came in less than two minutes after the previous one and STILL had an
+        empty pre-roll, i.e. the mic had been handed to a program that did not
+        want it and the first syllable was gone.
+
+        Our capture is exclusive (WDM-KS, measured 31.08: while dictation holds
+        the microphone another program gets "Device unavailable"), so a program
+        cannot simply take the microphone when it needs it — it has to be given
+        a gap. Hence the probe: whenever a listed program comes to the front it
+        gets `yield_probe_s` with the microphone free, and while it stays in
+        front that chance comes round every `yield_probe_every_s`. Start a call
+        and Windows marks the program as recording (see miclisteners.py), the
+        microphone stays free for as long as the call lasts, plus
+        `yield_grace_s` to survive a mute or a screen share. Do nothing with it
+        and dictation takes the microphone straight back, pre-roll and all.
+        """
+        if not self.yield_to:
+            return True
+        now = (paste_mod.foreground_exe() or "").lower()
+        if now not in self.yield_to:
+            self._front_exe = now
+            return True
+        clock = time.perf_counter()
+        # Somebody in the list is in front. Is it actually using the mic?
+        try:
+            if listeners_mod.is_recording(now, within_s=self.yield_grace_s):
+                self._front_exe = now
+                self._front_since = clock
+                self._probe_until = clock + self.yield_probe_s
+                return False
+        except Exception:
+            # No registry, no answer — fall back to the old behaviour and let
+            # the microphone go, because a broken call is worse than a lost
+            # syllable.
+            return False
+        if now != self._front_exe:
+            # It has just come to the front: give it the microphone for a
+            # moment, in case a call is being started right now.
+            self._front_exe = now
+            self._front_since = clock
+            self._probe_until = clock + self.yield_probe_s
+            return False
+        if clock < self._probe_until:
+            return False
+        # How often the chance comes round depends on whether this program has
+        # ever really used the microphone on this machine. Zoom did (a call on
+        # 31.08 at 19:01); Slack has not since 13.08 and Telegram for one
+        # minute all day. A call has to be able to start within a few seconds,
+        # and a chat window has no business costing the pre-roll every half
+        # minute either.
+        every = self.yield_probe_every_s
+        try:
+            if listeners_mod.is_recording(now, within_s=self.yield_known_s):
+                every = self.yield_probe_hot_every_s
+        except Exception:
+            pass
+        if clock - self._probe_until >= every:
+            self._probe_until = clock + self.yield_probe_s
+            return False
+        return True
+
     def _watchdog(self) -> None:
         started = time.perf_counter()
         while self.recording:
@@ -382,6 +620,7 @@ class Dictation:
         threading.Thread(target=self._finish, daemon=True).start()
 
     def _finish(self) -> None:
+        self.hot_window = paste_mod.foreground_exe()
         data = self.recorder.stop(
             tail_s=self.tail_s, quiet_ms=self.tail_quiet_ms
         )
@@ -389,7 +628,8 @@ class Dictation:
         self.process(data)
 
     # ---------- processing ----------
-    def transcribe_resilient(self, audio: np.ndarray) -> tuple[str, float]:
+    def transcribe_resilient(self, audio: np.ndarray,
+                             speech_s: float | None = None) -> tuple[str, float]:
         """Recognizes; if the GPU fell away, brings the model back up.
 
         Why. On 2026-08-19 the machine slept, the GPU context died, and the app
@@ -398,10 +638,24 @@ class Dictation:
         to reload it.
         """
         try:
-            return self.asr.transcribe(audio)
+            return self.asr.transcribe(audio, speech_s)
         except Exception as exc:
             if not self.asr.looks_like_lost_gpu(exc):
                 raise
+            # Out of video memory is not the same as a dead GPU: something big
+            # was loaded next to us (LM Studio holds the owner's model, and it
+            # can be thirty gigabytes). Give up our own extra first and try
+            # again — short takes get worse, dictation keeps working.
+            if "memory" in f"{exc}".lower() and self.asr.drop_short():
+                log("the video card ran out of memory — the second model for "
+                    "short takes is given up, dictation continues")
+                self.hud.set("warn", "gave up the extra model", hide_after=3.0)
+                try:
+                    return self.asr.transcribe(audio, speech_s)
+                except Exception as again:
+                    if not self.asr.looks_like_lost_gpu(again):
+                        raise
+                    exc = again
             log(f"the GPU fell away ({type(exc).__name__}), reloading the model")
             self.hud.set("think", "reloading")
             where = self.asr.reload()
@@ -410,7 +664,38 @@ class Dictation:
                 log(r"A restart fixes it: .\start-background.ps1 -Restart")
             else:
                 log(f"the model is back on {where}")
-            return self.asr.transcribe(audio)
+            return self.asr.transcribe(audio, speech_s)
+
+    def ask_the_sound(self, data: np.ndarray, raw: str, final: str):
+        """A question mark the recognizer missed, put back from the voice.
+
+        Runs only when nothing else found a question: neither the recognizer
+        nor the corrector. Then the recognizer is asked once more, differently
+        — which of the two endings, "." or "?", fits the recording better (see
+        Asr.question_score). Above the threshold the mark goes in.
+
+        Measured on 421 takes from 08-10.09.2026 (148 of them real questions):
+        the app delivered 124 of those; with this, 129, and not one extra mark
+        on a statement. It is the only thing here that can hear a question with
+        no question word in it, and 14 of the 24 lost ones were exactly that.
+
+        Returns the new text, or None to leave everything as it was.
+        """
+        self.last_sound_q = None
+        if not self.sound_questions or "?" in final or not final.strip():
+            return None
+        t0 = time.perf_counter()
+        d = self.asr.question_score(data, raw)
+        took = time.perf_counter() - t0
+        self.last_sound_q = d
+        if d is None or d <= self.sound_threshold:
+            return None
+        from .polish import flip_question
+
+        new_text, _erase, _want = flip_question(final)
+        log(f"  the voice asked a question (score {d:+.1f} > "
+            f"{self.sound_threshold:+.1f}, {took*1000:.0f} ms) — mark put back")
+        return new_text
 
     def process(self, data: np.ndarray) -> None:
         if not self.busy.acquire(blocking=False):
@@ -418,8 +703,12 @@ class Dictation:
             return
         try:
             t_all = time.perf_counter()
-            secs = len(data) / audio_mod.TARGET_SR
-            peak, rms = audio_mod.loudness(data)
+            # The pre-roll is sound from before the key went down. It is fed to
+            # the recognizer on purpose (that is what saves the first syllable)
+            # but it is not speech time and must not count as such.
+            pre_n = min(len(data), int(self.recorder.last_preroll_s * audio_mod.TARGET_SR))
+            secs = (len(data) - pre_n) / audio_mod.TARGET_SR
+            peak, rms = audio_mod.loudness(data[pre_n:])
             if secs < MIN_SECONDS:
                 self.hud.set("warn", "too short", hide_after=1.2)
                 return
@@ -428,9 +717,33 @@ class Dictation:
                 log(f"silence: {secs:.1f} s, peak {peak:.4f}")
                 return
 
-            raw, t_asr = self.transcribe_resilient(audio_mod.normalize(data))
+            # The level the microphone actually delivered decides the next take.
+            level_note = self.gain.adapt(peak, secs)
+            if peak >= 0.99:
+                self.hud.set("warn", "too loud", hide_after=1.5)
+            elif peak < 0.03:
+                self.hud.set("warn", "too quiet", hide_after=1.5)
+
+            raw, t_asr = self.transcribe_resilient(audio_mod.normalize(data), secs)
             if not raw.strip():
                 self.hud.set("warn", "nothing recognized", hide_after=1.5)
+                return
+
+            # The recognizer's stock line for "I heard nothing but had to say
+            # something" — subtitle credits it was trained on. Pasting it is
+            # worse than pasting nothing: it looks like a real take. The wav
+            # stays on disk either way, so nothing is actually lost.
+            from .asr import subtitle_ghost
+
+            ghost = subtitle_ghost(raw)
+            if ghost:
+                self.hud.set("warn", "heard nothing", hide_after=2.0)
+                # A long take deserves a loud line: on 25.08.2026 four minutes
+                # of speech came back as "Продолжение следует..." and only the
+                # log would have shown it.
+                how = "silence" if secs < 3 else f"{secs:.0f} s OF SPEECH"
+                log(f"the recognizer filled {how} with a stock subtitle line "
+                    f"({raw.strip()!r}) — not pasted, audio kept")
                 return
 
             pre, n_pre = self.fixes.apply(raw)
@@ -438,8 +751,24 @@ class Dictation:
                 pre, flipped = endings.apply(pre)
             else:
                 flipped = []
+            was_on = self.polisher.available
             polished, t_pol, note = self.polisher.polish(pre)
+            # The corrector coming BACK has been announced since the start
+            # (boot(), corrector_back). Its going away was announced nowhere:
+            # dictation rightly keeps working on raw text, but silently. On
+            # 22.08.2026 twenty-four takes in a row went unpolished between
+            # 20:57 and 22:07, on 26.08 another twenty-nine — and the only
+            # trace was in the log, read the next day. Said once, on the turn
+            # from working to not, so a dead LM Studio is not repeated on
+            # every take.
+            if was_on and not self.polisher.available:
+                log(f"corrector OFF — {self.polisher.reason}"
+                    f" (dictation continues; the text comes out raw)")
+                self.hud.set("warn", "corrector off", hide_after=3.0)
             final, _ = self.fixes.apply(polished)
+            sound_q = self.ask_the_sound(data, raw, final)
+            if sound_q is not None:
+                final = sound_q
 
             paste_text(
                 final,
@@ -458,11 +787,21 @@ class Dictation:
                     "id": rec_id,
                     "time": datetime.now().isoformat(timespec="seconds"),
                     "seconds_audio": round(secs, 2),
+                    # Sound captured from BEFORE the key went down. Zero means
+                    # the microphone was opened from cold on this press and the
+                    # first syllable is at risk — the thing that was happening
+                    # on 68% of takes until 29.08.2026.
+                    "preroll_s": round(self.recorder.last_preroll_s, 3),
                     "raw": raw,
                     "after_fixes": pre,
                     "final": final,
                     "polish_note": note,
+                    # How much the voice at the end sounded like a question
+                    # (only measured when nothing else found one).
+                    "sound_q": (None if self.last_sound_q is None
+                                else round(self.last_sound_q, 2)),
                     "ms_asr": int(t_asr * 1000),
+                    "asr_model": self.asr.last_model,
                     "ms_polish": int(t_pol * 1000),
                     "ms_total": int(total * 1000),
                     "fixes_applied": n_pre,
@@ -473,8 +812,16 @@ class Dictation:
             )
             self.hud.set("ok", f"{total:.1f} s", hide_after=1.2)
             log(f"{secs:.1f} s of speech -> {total:.2f} s "
-                f"(recognized {t_asr:.2f}, corrected {t_pol:.2f}, {note})")
+                f"(recognized {t_asr:.2f}, corrected {t_pol:.2f}, {note}, "
+                f"pasted via {paste_mod.last_route})")
             log(f"  {final}")
+            if peak >= 0.99:
+                log(f"  the take clipped (peak {peak:.2f}) — the words under the "
+                    f"clipping are lost")
+            elif peak < 0.03:
+                log(f"  the take came out very quiet (peak {peak:.3f})")
+            if level_note:
+                log(f"  {level_note}")
             for src, dst in flipped:
                 log(f"  restored the order: {src!r} -> {dst!r}")
             for src, dst in promoted:
@@ -543,13 +890,130 @@ def cmd_keytest(seconds: int = 12) -> None:
         print("Put the right one into config.toml -> [hotkey] name or scancode.")
 
 
+def cmd_bindtoggle(seconds: int = 15) -> None:
+    """Binds whatever button you press to "start/stop recording without holding".
+
+    Press it once and the app works out on its own whether the mouse sent a
+    button or the mouse software sent a keystroke, then writes the answer into
+    config.toml. There is nothing to look up and nothing to type by hand.
+
+    A gaming mouse only sends its extra buttons (G7, G8...) if they are mapped
+    to something in its own software. If nothing arrives, that is what the
+    message says.
+    """
+    import time
+
+    import keyboard
+    from pynput import mouse
+
+    caught: list[tuple[str, str]] = []  # (what to write in config, human name)
+    MOUSE_NAMES = {
+        mouse.Button.x1: ("x1", 'the side "back" button'),
+        mouse.Button.x2: ("x2", 'the side "forward" button'),
+        mouse.Button.middle: ("middle", "the wheel"),
+    }
+    # A modifier on its own is not a button: it is what a real key is pressed
+    # WITH. Binding one would fire on every Ctrl press in the system.
+    MODIFIERS = {"ctrl", "alt", "shift", "left ctrl", "right ctrl", "left alt",
+                 "right alt", "left shift", "right shift", "windows"}
+    # Ordinary typing is never a hotkey for this. Without the filter, one letter
+    # typed while the listener is up would be written into the settings and the
+    # dictation would start recording every time that letter was pressed.
+    TYPING = set("abcdefghijklmnopqrstuvwxyz0123456789") | {
+        "space", "enter", "backspace", "tab", "esc", "delete", "up", "down",
+        "left", "right", ",", ".", "/", ";", "'", "[", "]", "\\", "-", "=", "`",
+    }
+
+    def on_key(e):
+        if e.event_type != "down" or caught:
+            return
+        name = (e.name or "").lower()
+        if not name or name in MODIFIERS or name in TYPING or len(name) == 1:
+            return
+        if name in taken:
+            return
+        caught.append(("key", name))
+
+    def on_click(x, y, button, pressed):  # noqa: ARG001
+        if not pressed or caught or button not in MOUSE_NAMES:
+            return
+        if MOUSE_NAMES[button][0] in taken_buttons:
+            return
+        caught.append(("button", MOUSE_NAMES[button][0]))
+
+    # Keys the app already answers to. Catching one of them means the owner was
+    # simply dictating while this was listening, not choosing a button — and
+    # binding it would make one press do two jobs at once.
+    cfg = cfg_mod.load()
+    taken = set()
+    hk = cfg.get("hotkey", {})
+    for name in (hk.get("name"), hk.get("fix_hotkey"), hk.get("flip_hotkey"),
+                 cfg.get("repaste", {}).get("key")):
+        if name:
+            taken |= {p.strip().lower() for p in str(name).split("+")}
+    taken_buttons = {
+        b.strip().lower()
+        for b in str(cfg.get("repaste", {}).get("button", "")).split(",")
+        if b.strip()
+    }
+
+    print("Press the button you want — G8, or any other.")
+    print("One press starts recording, the next one stops it.")
+    print(f"Listening {seconds} s. Do not touch left or right mouse.\n")
+
+    listener = mouse.Listener(on_click=on_click)
+    listener.start()
+    keyboard.hook(on_key)
+    for _ in range(seconds * 10):
+        if caught:
+            break
+        time.sleep(0.1)
+    keyboard.unhook_all()
+    listener.stop()
+
+    if not caught:
+        print("Nothing arrived.")
+        print("A gaming mouse sends its extra buttons only when they are")
+        print("mapped in its own software. Open Logitech G HUB, put any free")
+        print("key on G8 — F16 will do — and run this again.")
+        return
+
+    field, value = caught[0]
+    other = "button" if field == "key" else "key"
+    text = cfg_mod.CONFIG_PATH.read_text(encoding="utf-8")
+    block = (
+        "\n[handsfree]\n"
+        "# One press starts recording, the next stops it — nothing to hold.\n"
+        "# Written by `run.ps1 bindtoggle`.\n"
+        "enabled = true\n"
+        f'{field} = "{value}"\n'
+        f'{other} = ""\n'
+        "# Swallow it so Windows does not also do its usual job with it. On by\n"
+        "# default here: a mouse button sends a key that already means something\n"
+        "# (Print Screen opens the Snipping Tool, the side buttons go back and\n"
+        "# forward in a browser), and that would fire on every recording.\n"
+        "suppress = true\n"
+    )
+    if "[handsfree]" in text:
+        head, _sep, tail = text.partition("[handsfree]")
+        rest = tail.split("\n[", 1)
+        text = head + block.lstrip("\n") + ("\n[" + rest[1] if len(rest) > 1 else "")
+    else:
+        text = text.rstrip("\n") + "\n" + block
+    cfg_mod.CONFIG_PATH.write_text(text, encoding="utf-8")
+
+    print(f"Caught: {field} = {value!r}. Written into config.toml.")
+    print("Restart the dictation and the button works:")
+    print("    .\\start-background.ps1 -Restart")
+
+
 def cmd_selftest() -> None:
     ok = True
     cfg = cfg_mod.load()
     print("=== self-test ===\n")
 
     hint = cfg["mic"].get("name", "")
-    devices = audio_mod.find_devices(hint)
+    devices = audio_mod.find_devices(hint, str(cfg["mic"].get("path", "raw")))
     if devices == [None] and hint:
         print(f"[X] microphone {hint!r} not found. List them: run.ps1 mics")
         ok = False
@@ -560,7 +1024,8 @@ def cmd_selftest() -> None:
 
     print("[.] trying to record 1 second...")
     try:
-        rec = audio_mod.Recorder(devices, int(cfg["mic"]["samplerate"]))
+        rec = audio_mod.Recorder(devices, int(cfg["mic"]["samplerate"]),
+                                 preroll_s=0.0, hot_s=0.0)
         rec.start()
         time.sleep(1.0)
         data = rec.stop()
@@ -627,17 +1092,100 @@ def cmd_bench(path: str) -> None:
     print(f"\ntext: {text}")
 
 
-SPOKENLY = Path(r"C:\Users\panto\AppData\Roaming\Spokenly\History")
+SPOKENLY = Path.home() / "AppData" / "Roaming" / "Spokenly" / "History"
 RU_WORD_RE = __import__("re").compile(r"[а-яё]{3,}", __import__("re").IGNORECASE)
 
 
-def cmd_learnwords(min_count: int = 1) -> None:
+def cmd_show(needle: str) -> None:
+    """Everything known about one take, found by the label from the page.
+
+    The other half of the "метка" button: he copies a label off the page and
+    pastes it into a conversation, and this prints exactly what that take went
+    through — what was heard, what the dictionary changed, what the corrector
+    did, and where the audio is. Before this, talking about a specific take
+    meant describing it from memory and hunting through the logs by hand.
+
+    Accepts the full id, a fragment of it, or a piece of the text.
+    """
+    import json
+
+    needle = (needle or "").strip().lstrip("#").strip()
+    if not needle:
+        print("надо сказать, какую надиктовку показать:")
+        print("  run.ps1 show 2026-08-29_085812-156")
+        print("  run.ps1 show будильник")
+        return
+
+    hits = []
+    for lf in sorted(cfg_mod.LOG_DIR.glob("*.jsonl")):
+        for n, line in enumerate(lf.read_text(encoding="utf-8").splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            rec.setdefault("id", f"{lf.stem}_line{n:04d}")
+            hay = f"{rec['id']} {rec.get('raw','')} {rec.get('final','')}".lower()
+            if needle.lower() in hay:
+                hits.append(rec)
+
+    if not hits:
+        print(f"не нашёл ничего по {needle!r}")
+        return
+    if len(hits) > 6:
+        print(f"под {needle!r} подходит {len(hits)} надиктовок, показываю последние 6:")
+        hits = hits[-6:]
+
+    marks = {}
+    try:
+        marks = json.loads(cfg_mod.ROOT.joinpath("state", "marks.json")
+                           .read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    for rec in hits:
+        mark = marks.get(rec["id"], {})
+        pre = float(rec.get("preroll_s", -1))
+        print()
+        print(f"  {rec['id']}   {rec.get('time','')}   {rec.get('seconds_audio',0)} с")
+        print(f"  услышано : {rec.get('raw','')}")
+        if rec.get("after_fixes") and rec["after_fixes"] != rec.get("raw"):
+            print(f"  словарь  : {rec['after_fixes']}   ({rec.get('fixes_applied',0)} замен)")
+        if rec.get("final") and rec["final"] != rec.get("after_fixes"):
+            print(f"  правщик  : {rec['final']}")
+        print(f"  вставлено: {rec.get('final') or rec.get('raw','')}")
+        if mark.get("corrected"):
+            print(f"  правил ты: {mark['corrected']}")
+        if mark.get("bad"):
+            print("  помечено : плохо")
+        print(f"  правщик сказал: {rec.get('polish_note','')}")
+        # Пустая предзапись = микрофон открывали с нуля, начало фразы под
+        # угрозой. Пишется в журнал с 29.08.2026, у записей до этого её нет.
+        if pre >= 0:
+            print(f"  предзапись: {pre:.2f} с"
+                  + ("   <-- НОЛЬ, начало фразы могло срезаться" if pre < 0.05 else ""))
+        print(f"  сколько думала: {rec.get('ms_asr',0)} мс распознавание, "
+              f"{rec.get('ms_polish',0)} мс правщик")
+        print(f"  звук     : {rec.get('wav','')}")
+
+
+def cmd_learnwords(min_count: int = 3) -> None:
     """Builds the list of your own-language words that you actually say.
 
     It stops the corrector from turning your words into English terms
     ("сессию" -> "session"). Built from everything already dictated: the
     Spokenly history and this app's own logs. The longer you use it, the fuller
     the list.
+
+    min_count was 1 until 29.08.2026, so a single mishearing became a protected
+    word for good — and a protected word is one the corrector is forbidden to
+    fix. That is how "мусайба" and "мусыева" got into the list: both are the
+    name "Мусаиб" misheard once each, and their presence there was the reason
+    the corrector could not put the name right afterwards. The program had
+    locked itself out of repairing its own mistake. Three sightings is the
+    threshold for calling something a word of yours rather than a slip.
     """
     import json
     from collections import Counter
@@ -843,6 +1391,34 @@ def cmd_dry(paths: list[str]) -> None:
         print(f"worst time:           {max(t[1] for t in totals):.2f} s")
 
 
+def only_one_copy() -> bool:
+    """True if we are the only dictation running.
+
+    A second copy is not merely useless, it breaks the first one: the raw
+    microphone path is exclusive, both copies grab the same key, and both load
+    the recognizer into the same video card. On 2026-08-23 two copies started
+    within the same second and dictation hung on "loading" — from the outside
+    it looked like the program was broken.
+
+    A Windows named object: it disappears by itself when the process ends, so
+    a crash or a kill never leaves a stale lock behind (a lock file would).
+    """
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.CreateMutexW(None, False, r"Local\stt-dictation-single")
+        err = ctypes.get_last_error()
+        if not handle:
+            return True                       # cannot tell — do not stand in the way
+        if err == 183:                        # ERROR_ALREADY_EXISTS
+            return False
+        globals()["_single_lock"] = handle    # hold it for the life of the process
+        return True
+    except Exception:
+        return True
+
+
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else "run"
@@ -854,6 +1430,8 @@ def main() -> None:
         from . import mousehook
 
         mousehook.watch(int(args[1]) if len(args) > 1 else 12)
+    elif cmd == "bindtoggle":
+        cmd_bindtoggle(int(args[1]) if len(args) > 1 else 15)
     elif cmd == "selftest":
         cmd_selftest()
     elif cmd == "bench":
@@ -861,9 +1439,11 @@ def main() -> None:
     elif cmd == "dry":
         cmd_dry(args[1:])
     elif cmd == "learnwords":
-        cmd_learnwords(int(args[1]) if len(args) > 1 else 1)
+        cmd_learnwords(int(args[1]) if len(args) > 1 else 3)
     elif cmd == "import-spokenly":
         cmd_import_spokenly()
+    elif cmd == "show":
+        cmd_show(args[1] if len(args) > 1 else "")
     elif cmd == "dashboard":
         import webbrowser
 
@@ -873,6 +1453,10 @@ def main() -> None:
         print("(the page is served by the app itself — it has to be running)")
         webbrowser.open(url)
     else:
+        if not only_one_copy():
+            log("dictation is already running — this second copy is closing.")
+            log(r"To restart it: .\start-background.ps1 -Restart")
+            return
         Dictation().run()
 
 
