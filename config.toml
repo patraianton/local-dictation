@@ -133,7 +133,7 @@ model = "large-v3-turbo"
 #   Плесня, какова хуя        -> Подписка, какого хуя?
 #   Вочисть его, конечно      -> Очисти его, конечно
 #   Пластический клиент       -> Платящий клиент
-#   Архан / Версара / лавиш   -> Орхан / Vercel / Lavish
+#   Аксим / Версара / лавиш   -> Максим / Vercel / Lavish
 # On LONG takes it is the other way round and four times slower (1.15 s
 # against 0.27 s), so the switch is by length, not for everything.
 # Costs 3 GB of video memory and 4 seconds at start-up. Empty = off.

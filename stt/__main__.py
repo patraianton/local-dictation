@@ -1182,7 +1182,7 @@ def cmd_learnwords(min_count: int = 3) -> None:
     min_count was 1 until 29.08.2026, so a single mishearing became a protected
     word for good — and a protected word is one the corrector is forbidden to
     fix. That is how "мусайба" and "мусыева" got into the list: both are the
-    name "Мусаиб" misheard once each, and their presence there was the reason
+    name "Даниил" misheard once each, and their presence there was the reason
     the corrector could not put the name right afterwards. The program had
     locked itself out of repairing its own mistake. Three sightings is the
     threshold for calling something a word of yours rather than a slip.

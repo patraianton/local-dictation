@@ -11,7 +11,7 @@ the line and never reached the hint.
 Hand-ordering cannot keep up with what a person actually talks about. Measured
 on 2994 takes from the fortnight to 31.08.2026:
 
-    in the hint, not said once     Ишай, mailbox, Postgres, Supabase
+    in the hint, not said once     Ноам, mailbox, Postgres, Supabase
     said a lot, not in the hint    autopase (116), Lavish (77), Fable (72),
                                    Mac (62), VPS (59), Hermes (49),
                                    Hostinger (34), Chrome Extension (20)
@@ -34,7 +34,7 @@ from pathlib import Path
 WORD_RE = re.compile(r"[^\W\d_][\w.'-]*", re.UNICODE)
 
 # The names of the people come first in glossary.txt and stay in the hint
-# whatever the counts say: "Ишай" was heard as "Шай" on 25.08.2026 and moved to
+# whatever the counts say: "Ноам" was heard as "Ноа" on 25.08.2026 and moved to
 # the top by hand on 27.08 for exactly that reason, and he is not talked about
 # every day.
 KEEP_HEAD = 4
