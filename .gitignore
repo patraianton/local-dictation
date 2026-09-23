@@ -30,3 +30,12 @@ __pycache__/
 # Real transcripts and audio samples of the owner. Never publish.
 bench/transcripts.txt
 bench/*.wav
+
+# Session handover notes (Russian, quote real people).
+HANDOVER-*.md
+
+# Benchmark inputs and dumps: real dictations of the owner. Never publish.
+bench/*-pairs*.json
+bench/qeval-dump.json
+bench/qlabels.json
+bench/qscore.json

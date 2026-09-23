@@ -28,7 +28,7 @@ PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 
 # Подсказка-список: сухое перечисление терминов.
 PROMPT_LIST = (
-    "Термины и названия: Claude Code, Codex, Opus, Sonnet, TimelinesAI, WhatsApp, "
+    "Термины и названия: Claude Code, Codex, Opus, Sonnet, WhatsApp, "
     "Intercom, Slack, Linear, Mailflow, HeyReach, PostHog, Vercel, GitHub, worktree, "
     "loop, signup, deploy, prompt, API, CRM, MRR, churn, team-ops, autopase."
 )
