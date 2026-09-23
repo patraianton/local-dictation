@@ -42,7 +42,14 @@ class DeadLmStudio:
 
 
 class Alive:
-    """LM Studio that answers, with one chat model loaded."""
+    """LM Studio that answers, with one chat model loaded.
+
+    Отвечает как /api/v0/models — с полями state и type. Диктовка спрашивает
+    именно его: обычный /v1/models перечисляет всё когда-либо скачанное, и по
+    нему нельзя отличить модель В ПАМЯТИ от просто установленной. Подделка
+    отвечала по-старому и поэтому выглядела для программы как «в памяти ничего
+    нет» — проверка падала на живом коде, который работает правильно.
+    """
 
     class Reply:
         status_code = 200
@@ -51,7 +58,8 @@ class Alive:
             pass
 
         def json(self):
-            return {"data": [{"id": "qwen/qwen3-30b"}],
+            return {"data": [{"id": "qwen/qwen3-30b",
+                              "state": "loaded", "type": "llm"}],
                     "choices": [{"message": {"content": "ок"}}]}
 
     def get(self, *a, **kw):
@@ -122,7 +130,13 @@ def main() -> None:
           f"in flight: {pol2._client.calls}")
 
     # 6. the reason is reported honestly, not silently swallowed
-    time.sleep(SLOW + 0.4)
+    # Ждём, пока проверка в фоне доработает, а не «примерно столько же, сколько
+    # один запрос»: с тех пор как диктовка стала спрашивать /api/v0/models и
+    # откатываться на /v1/models, до мёртвого сервера идёт ДВА запроса, и одна
+    # SLOW стала мала. Ждать по флагу надёжнее любой константы.
+    deadline = time.perf_counter() + 4 * SLOW + 1.0
+    while pol2._probing and time.perf_counter() < deadline:
+        time.sleep(0.05)
     check("LM Studio" in pol2.reason,
           "the page and the log still see why the corrector is off", pol2.reason)
 

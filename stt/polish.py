@@ -10,9 +10,11 @@ them as they are. Translating them would invalidate all of it.
 """
 import difflib
 import re
+import sys
 import threading
 import time
 
+import pathlib
 import httpx
 
 from . import endings
@@ -20,6 +22,10 @@ from . import endings
 # Split into words, keeping everything in between (spaces, punctuation).
 SPLIT_RE = re.compile(r"([^\W_]+)", re.UNICODE)
 SENT_END = re.compile(r"[.!?…]['\"»)\s]*$")
+# Checked as a tuple, not a string: an empty string counts as "in" any
+# string, and text[:1] is empty on an empty take.
+DASHES = ("—", "–", "-")
+DOUBLE_DASH_RE = re.compile(r"—\s*—")
 CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE | re.UNICODE)
 
 # Rough transliteration, used only to compare whether something written in
@@ -141,7 +147,7 @@ def constrain(
     if not pol_words:
         return raw
 
-    def ok(words: list[str], said_words: list[str] | None = None) -> bool:
+    def ok(words: list[str], said_words: list[str]) -> bool:
         """May this substitution from the corrector be accepted."""
         # One thing is allowed on its own: restoring the imperative form of
         # a verb. "Сделаю session handover" -> "Сделай session handover". Only
@@ -155,8 +161,6 @@ def constrain(
             return True
         if not words or not all(w.lower() in allowed for w in words):
             return False
-        if said_words is None:  # added from nothing: only if it is a term
-            return True
         said = " ".join(said_words)
         # Substitution is allowed only for what the recognizer wrote in
         # Cyrillic by ear. Otherwise the corrector swaps one glossary term for
@@ -193,7 +197,11 @@ def constrain(
             # "отчёты.делать".
             idx = 2 * j
             sep = pol_parts[idx] if 0 < idx < 2 * len(pol_words) else " "
-            if raw_sep and raw_sep.strip():
+            # raw_sep is passed only where the corrector's own separator cannot
+            # be trusted: around a word we are rolling back. There the
+            # punctuation belongs to a rewrite that is being thrown away, so
+            # the raw one wins even when it is a plain space.
+            if raw_sep is not None:
                 sep = raw_sep
             sep = sep or " "
             out.append(sep)
@@ -220,30 +228,71 @@ def constrain(
         a=[key(w) for w in raw_words], b=[key(w) for w in pol_words],
         autojunk=False,
     )
+    # Set right after a word has been rolled back. The separator that follows
+    # such a word is the corrector's, and it describes a phrase that no longer
+    # exists — see the note in put().
+    rolled_back = False
+
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             for j in range(j1, j2):
-                put(pol_words[j], j, raw_words[i1 + (j - j1)])
+                i = i1 + (j - j1)
+                # Only the FIRST word after a rollback: from there on the two
+                # texts agree again and the corrector's punctuation is welcome.
+                after = raw_parts[2 * i] if (rolled_back and j == j1) else None
+                put(pol_words[j], j, raw_words[i], raw_sep=after)
+            rolled_back = False
         elif tag == "replace":
             if ok(pol_words[j1:j2], raw_words[i1:i2]):
                 for j in range(j1, j2):
                     put(pol_words[j], j)
+                rolled_back = False
             else:
                 for k, i in enumerate(range(i1, i2)):
                     put(raw_words[i], j1 + k, raw_sep=raw_parts[2 * i])
+                rolled_back = True
         elif tag == "delete":
             # The corrector dropped a word: put it back. It is the speaker's
             # speech, not ours.
             for k, i in enumerate(range(i1, i2)):
                 put(raw_words[i], j1 + k, raw_sep=raw_parts[2 * i])
+            rolled_back = True
         elif tag == "insert":
-            # Added on its own initiative: accept only if it is a glossary term.
-            if ok(pol_words[j1:j2]):
-                for j in range(j1, j2):
-                    put(pol_words[j], j)
+            # A word the speaker never said does not go in. Not even a glossary
+            # term: the branch used to accept those, and measured over 2218
+            # takes every single one of the six it let through was wrong. The
+            # worst, on 2026-08-20: "Там Bitrix, GoHighLevel и так далее" was
+            # pasted as "Там Bitrix, GoHighLevel, Salesforce, HubSpot,
+            # Pipedrive, Zoho, и так далее" — four systems the owner never
+            # named, written into a CV he was dictating. A term the corrector
+            # splits into two words ("кидни пас" -> "Kidney Pass") is not this
+            # case: that is a replace, and it still goes through.
+            #
+            # An invented word usually brought a comma with it: "я новую сессию
+            # начал" came back as "я, когда новую сессию начал". The word goes,
+            # so its comma goes too.
+            rolled_back = True
 
     out.append(pol_parts[-1] if len(pol_parts) > 1 else "")
     text = re.sub(r"[ \t]{2,}", " ", "".join(out)).strip()
+    # A dash opening the text is the corrector reading the take as a line
+    # of dialogue: "Все дело, не надо было" came back as "— Всё дело — не
+    # надо было" (22.08.2026). Dictation is never dialogue.
+    if text[:1] in DASHES and raw.lstrip()[:1] not in DASHES:
+        text = text[1:].lstrip()
+    # And a dash doubled onto one the speaker had already said.
+    text = DOUBLE_DASH_RE.sub("—", text)
+    # The corrector is allowed to ADD a capital letter, and put() above already
+    # rolls that back where it does not belong. The mirror case had no rule at
+    # all: it could TAKE one away from the very first word, and the take then
+    # started with a small letter — "Что вообще делать?" pasted as "что вообще
+    # делать?" (29.08.2026, and twice more in the four days before). A take
+    # always opens a sentence, so lowercasing its first word is never right.
+    # Only the first word: further along, lowercasing is often a real fix for a
+    # capital the recognizer put in the middle of a phrase.
+    said_head = raw.lstrip()[:1]
+    if said_head.isupper() and text[:1].islower() and text[:1] == said_head.lower():
+        text = said_head + text[1:]
     return no_false_question(raw, text)
 
 
@@ -297,23 +346,189 @@ def no_false_question(raw: str, text: str) -> str:
     So the third rule costs one caught question and removes two false marks.
     Chosen deliberately: a false mark is noticed and resented, a missing one
     almost never is. The recognizer's own mark is trusted: it rarely errs.
+
+    Rule 4 (added 2026-08-20). Rule 3 turned out to be full of holes: one
+    question word anywhere in the sentence — or one question mark heard anywhere
+    in the take — let the corrector stick marks wherever it pleased. Three real
+    failures in a single day, all of them on takes where the recognizer heard no
+    question at that spot at all:
+
+        heard "…а это где-то внизу закопано."   ->  "…внизу закопано?"
+        heard "…когда страница рефрешена."      ->  "…рефрешена?"
+        heard "…чтобы я в другой сессии тоже это мог запустить?"
+                          ->  "…чтобы я в другой сессии? тоже это мог запустить?"
+
+    Over the 227 takes since rule 3 landed the corrector added 7 marks; 5 of
+    them were wrong. So the count is capped now: the result may not carry more
+    question marks than the recognizer heard. Which of them survive is decided
+    by how well a sentence matches a raw sentence that really ended with "?" —
+    that is what keeps the mark on "…мог запустить?" and takes it off the
+    invented split in the middle.
+
+    The price is the questions the recognizer misses entirely: 33 of 43 instead
+    of 36. The owner still has ctrl+f13 to put a mark back by hand. To go back
+    to the old behaviour: config.toml -> [polish] questions = "corrector".
+
+    Rule 5 (added 2026-08-22). Rules 1 and 2 used to fire even on a mark the
+    recognizer had heard, so every question shaped as a request lost its mark:
+
+        heard "Выясни, кто за ночь пытался авторизировать Linear?"
+        heard "Скажи, ты читал какой-то handover документ?"
+        heard "Посмотри, с чем может быть связано ухудшение качества диктовки?"
+
+    All three came back as full stops. This reverses the 14.08 decision that
+    "an order stays an order even with a heard mark". The reason it was made —
+    a mark on an order makes an agent ask back instead of working — was about
+    marks the corrector INVENTED on orders; it was never meant to overrule the
+    voice. On 22.08 30% of the owner's heard questions opened with an
+    imperative verb, against 0-8% on every earlier day, and the rule went from
+    a rounding error to a third of his questions.
+
+    So a mark the recognizer heard is now left alone, and cap_questions still
+    keeps the count down to what was actually heard.
     """
     if "?" not in text:
         return text
     # The recognizer's mark is checked across the whole take: the corrector may
     # merge or split sentences, so matching them one to one is not reliable.
     heard_question = "?" in (raw or "")
+    # Rules 1-3 exist to kill marks the CORRECTOR invented. When the recognizer
+    # heard a question itself, they stand down: the voice is the ground truth
+    # for whether a question was asked, and the count is capped further down by
+    # cap_questions anyway. See rule 5 in the docstring for why this reverses
+    # the 14.08 decision.
+    guard = not heard_question or questions_mode == "corrector"
     out = []
     for sentence in SENTENCE_RE.findall(text):
         stripped = sentence.rstrip()
-        if stripped.endswith("?") and (
+        if stripped.endswith("?") and guard and (
             endings.starts_with_command(sentence)
             or endings.starts_with_subordinate(sentence)
             or not (heard_question or endings.ASK_RE.search(sentence))
         ):
             sentence = sentence.replace("?", ".", 1)
         out.append(sentence)
-    return "".join(out) if out else text
+    text = "".join(out) if out else text
+    return text if questions_mode == "corrector" else cap_questions(raw, text)
+
+
+# How question marks are decided. "heard" — never more than the recognizer
+# heard; "corrector" — the old behaviour, the corrector may add its own.
+questions_mode = "heard"
+
+
+def _tail_key(sentence: str, words: int = 3) -> str:
+    """The last few words of a sentence, lowercase — for matching raw to result."""
+    found = SPLIT_RE.findall(sentence or "")
+    return " ".join(w.lower() for w in found[-words:])
+
+
+# A comma and "а"/"но"/"и" start a new clause: whatever the sentence began
+# with, the mark at the end no longer belongs to it. This is the whole
+# difference between "Почему статьи не залились?" — a real question the
+# recognizer missed — and "Почему у меня три Айдала, а это где-то внизу
+# закопано?", which is a complaint with a made-up mark.
+CLAUSE_BREAK_RE = re.compile(r",\s*(?:а|но|и|да)\s", re.IGNORECASE | re.UNICODE)
+
+# How far into the sentence the question word may stand. Six words is measured,
+# not guessed: "Только опять я не понимаю, почему тебе нужен мой компьютер?" —
+# a real restored question from 15.08 — carries five words before "почему".
+# Seven would let back "Можно сделать как-то, чтобы не мелькали, когда страница
+# рефрешена?", where "когда" is the eighth word and no question is being asked.
+ASK_WITHIN_WORDS = 6
+
+# "Что" and "как" are question words at the head of a sentence and ordinary
+# conjunctions after a comma — and in this speaker's dictation the second is
+# what they nearly always are: "вот тут написано, что у тебя memory missing",
+# "разбирайся, что с ним не так" (an order). So after a comma these two alone
+# do not open the loophole. Measured over the takes from 20.08.2026 on: 5 marks
+# that should not have been there go, 3 real questions go with them. The owner
+# chose that trade on 2026-08-25 — a wrong mark makes an agent ask back instead
+# of working, a missing one is one Ctrl+F13 away.
+#
+# The test is the comma, not the word's position. "Чтобы что?" is a real short
+# retort with "что" second, and a rule of "only the very first word" killed it.
+SOFT_ASK = {"что", "как"}
+
+# Words a person opens their mouth with before the thought starts: they carry
+# no meaning of their own, and the comma after them is not a clause break.
+# Until 10.09.2026 they were treated as one, and that alone killed a whole
+# question three days running — the owner asked "Хорошо, как скоро мы это
+# закончим?" three times in a row, each time got a full stop, and each time
+# said it again. The corrector had it right ("Как скоро мы это закончим?"); the
+# rollback of the dropped "Хорошо," put "как" after a comma, and the rule above
+# then read it as a conjunction.
+FILLERS = {
+    "хорошо", "окей", "ок", "ладно", "так", "ну", "вот", "слушай", "слушайте",
+    "смотри", "смотрите", "кстати", "короче", "давай", "давайте", "блядь",
+    "блять", "да", "нет", "и", "а", "но", "значит", "погоди", "подожди",
+}
+
+
+def _only_fillers(prefix: str) -> bool:
+    """Nothing but filler words stands before the question word."""
+    words = [w.lower() for w in SPLIT_RE.findall(prefix)]
+    return bool(words) and len(words) <= 3 and all(w in FILLERS for w in words)
+
+
+def corrector_may_add(sentence: str) -> bool:
+    """May the corrector put a mark the recognizer never heard on this sentence.
+
+    Only when the sentence opens as a question: a question word among the first
+    few words, and no new clause between it and the mark. Filler words in front
+    do not count as a clause — see FILLERS.
+    """
+    ask = endings.ASK_RE.search(sentence or "")
+    if not ask:
+        return False
+    prefix = sentence[: ask.start()]
+    if (ask.group(1).lower() in SOFT_ASK and "," in prefix
+            and not _only_fillers(prefix)):
+        return False
+    before = len(SPLIT_RE.findall(prefix))
+    if before >= ASK_WITHIN_WORDS:
+        return False
+    return not CLAUSE_BREAK_RE.search(sentence[ask.end():])
+
+
+def cap_questions(raw: str, text: str) -> str:
+    """No more question marks than the recognizer actually heard.
+
+    The marks the recognizer did hear are handed to the sentences that support
+    them best: first the ones opening with a question word, then the ones ending
+    the same way as a raw sentence that carried a mark, then left to right.
+
+    The order matters. "Что у тебя есть, я тебе сейчас буду делать?" — the
+    recognizer put its single mark at the very end of a run-on, and the corrector
+    split it in two. By the tail the mark belongs to "…буду делать", but the
+    question is the first half. The opening word knows better than the tail.
+
+    Everything above that count is the corrector's own idea and survives only if
+    the sentence opens as a question — see corrector_may_add.
+    """
+    heard = (raw or "").count("?")
+    sentences = SENTENCE_RE.findall(text)
+    marked = [i for i, s in enumerate(sentences) if s.rstrip().endswith("?")]
+    if len(marked) <= heard:
+        return text
+
+    raw_tails = {
+        _tail_key(s) for s in SENTENCE_RE.findall(raw or "") if s.rstrip().endswith("?")
+    }
+
+    def support(i: int) -> tuple:
+        sentence = sentences[i]
+        tail = _tail_key(sentence.rstrip().rstrip("?"))
+        ask = endings.ASK_RE.search(sentence)
+        first = SPLIT_RE.search(sentence)
+        opens = bool(ask and first and ask.start() <= first.start())
+        return (opens, tail in raw_tails and bool(tail), -i)
+
+    keep = set(sorted(marked, key=support, reverse=True)[:heard])
+    for i in marked:
+        if i not in keep and not corrector_may_add(sentences[i]):
+            sentences[i] = sentences[i].replace("?", ".", 1)
+    return "".join(sentences)
 
 
 def allowed_words(terms: list[str], fixes=None) -> set[str]:
@@ -337,7 +552,10 @@ class Polisher:
         self.max_growth = float(p.get("max_growth", 1.6))
         self.mode = p.get("mode", "light")
         self.min_words = int(p.get("min_words", 4))
-        self.keep_loaded_s = int(p.get("keep_loaded_s", 3600))
+        # Module-level on purpose: constrain() is also called straight from the
+        # tests and from the page, without a Polisher at hand.
+        global questions_mode
+        questions_mode = str(p.get("questions", "heard")).strip().lower()
         self.terms = terms
         self.allowed = allowed_words(terms, fixes)
         self.protected = protected or set()
@@ -345,8 +563,21 @@ class Polisher:
         self.reason = "not checked yet"
         self._next_check = 0.0  # do not hammer a dead LM Studio on every take
         self._probing = False   # a background re-check is already in flight
+        self._loaded_seen = 0.0  # when the list of loaded models was last read
         self.on_status = None   # optional: called when availability changes
-        self._client = httpx.Client(timeout=self.timeout)
+        # A bearer key for servers that want one (llama-server does, LM Studio
+        # does not): either the key itself or a path to a file holding it.
+        key = str(p.get("api_key", "") or "").strip()
+        key_file = str(p.get("api_key_file", "") or "").strip()
+        if not key and key_file:
+            try:
+                key = pathlib.Path(key_file).expanduser().read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                key = ""
+                print(f"[polish] WARNING: api_key_file {key_file} is not readable ({exc}); "
+                      "requests go without a key and the server will answer 401", file=sys.stderr, flush=True)
+        headers = {"Authorization": f"Bearer {key}"} if key else None
+        self._client = httpx.Client(timeout=self.timeout, headers=headers)
 
     @property
     def system_prompt(self) -> str:
@@ -355,49 +586,90 @@ class Polisher:
             return base
         return base + "\n\nСписок названий и терминов:\n" + ", ".join(self.terms[:150])
 
+    def loaded_models(self, timeout: float = 2.0) -> tuple[list[str], str]:
+        """Chat models that are IN MEMORY right now. Never anything else.
+
+        The owner's rule, 2026-08-20: the model he loaded by hand is the one he
+        works with, it must stay, and dictation must not drag a second one into
+        VRAM. Asking LM Studio for a model that is merely installed makes it
+        load that model — 18.5 GB and eleven seconds, over a four-second
+        timeout, which is exactly how three takes in a row came out unpolished
+        that evening.
+
+        Hence /api/v0/models, which reports "state" for each entry. The old
+        /v1/models cannot be used for the choice: it lists everything ever
+        downloaded, loaded or not, and looks identical either way.
+        """
+        try:
+            r = self._client.get(f"{self.base}/api/v0/models", timeout=timeout)
+            r.raise_for_status()
+            data = r.json().get("data", [])
+        except Exception as exc:
+            # Older LM Studio has no /api/v0. There /v1/models did list only
+            # what was loaded, so the old behaviour is the right fallback.
+            try:
+                r = self._client.get(f"{self.base}/v1/models", timeout=timeout)
+                r.raise_for_status()
+                ids = [m.get("id", "") for m in r.json().get("data", [])]
+                chat = [i for i in ids if i and "embed" not in i.lower()]
+                return sorted(chat), "" if chat else "LM Studio has nothing loaded"
+            except Exception:
+                return [], f"LM Studio is not answering ({type(exc).__name__})"
+        chat = [
+            m.get("id", "")
+            for m in data
+            if m.get("state") == "loaded"
+            and m.get("type") in ("llm", "vlm")
+            and m.get("id")
+        ]
+        if not chat:
+            return [], "LM Studio has no chat model in memory"
+        return sorted(chat), ""
+
     def check(self, force: bool = False) -> bool:
-        """Is there a live LM Studio with a model loaded."""
+        """Is there a live LM Studio with a model already in memory."""
         if not self.enabled:
             self.available, self.reason = False, "disabled in the settings"
             return False
         if not force and time.time() < self._next_check:
             return False
         self._next_check = time.time() + 30.0
-        try:
-            r = self._client.get(f"{self.base}/v1/models", timeout=2.0)
-            r.raise_for_status()
-            ids = [m.get("id", "") for m in r.json().get("data", [])]
-            chat_ids = [i for i in ids if "embed" not in i.lower()]
-            if not chat_ids:
-                self.available = False
-                self.reason = "LM Studio has no chat model loaded"
-                return False
-            if not self.model or self.model not in chat_ids:
-                self.model = chat_ids[0]
-            self.available, self.reason = True, "ok"
-            self._next_check = 0.0
-            return True
-        except Exception as exc:
-            self.available = False
-            self.reason = f"LM Studio is not answering ({type(exc).__name__})"
+        chat_ids, why = self.loaded_models()
+        if not chat_ids:
+            self.available, self.reason = False, why
             return False
+        if not self.model or self.model not in chat_ids:
+            self.model = chat_ids[0]
+        self.available, self.reason = True, "ok"
+        self._loaded_seen = time.time()
+        self._next_check = 0.0
+        return True
+
+    def still_loaded(self, max_age: float = 20.0) -> bool:
+        """Is the chosen model still in memory — checked before every request.
+
+        He may swap models at any moment; whatever is in memory now is what
+        dictation must use. The check costs about 15 ms on this machine and
+        happens at most once every max_age seconds.
+        """
+        if time.time() - self._loaded_seen < max_age:
+            return True
+        chat_ids, why = self.loaded_models(timeout=1.0)
+        self._loaded_seen = time.time()
+        if not chat_ids:
+            self.available, self.reason = False, why
+            return False
+        if self.model not in chat_ids:
+            self.model = chat_ids[0]
+        self.available, self.reason = True, "ok"
+        return True
 
     def list_models(self) -> tuple[list[str], str]:
-        """(models LM Studio can see, or why it sees none).
+        """(models the page may offer, or why there are none).
 
-        Used by the page: the user picks a corrector from what is actually
-        loaded, without editing config.toml.
+        Only what is in memory: picking a model on the page must not load one.
         """
-        try:
-            r = self._client.get(f"{self.base}/v1/models", timeout=2.0)
-            r.raise_for_status()
-            ids = [m.get("id", "") for m in r.json().get("data", [])]
-            chat = [i for i in ids if i and "embed" not in i.lower()]
-            if not chat:
-                return [], "LM Studio is running but no chat model is loaded"
-            return sorted(chat), ""
-        except Exception as exc:
-            return [], f"LM Studio is not answering ({type(exc).__name__})"
+        return self.loaded_models()
 
     def use_model(self, name: str) -> bool:
         """Switches the corrector to another model on the fly."""
@@ -421,7 +693,6 @@ class Polisher:
                 "max_tokens": max_tokens,
                 "stream": False,
                 "chat_template_kwargs": {"enable_thinking": False},
-                "ttl": self.keep_loaded_s,
             },
             timeout=timeout,
         )
@@ -446,9 +717,8 @@ class Polisher:
                     "max_tokens": 1,
                     "temperature": 0.0,
                     "stream": False,
-                    "ttl": self.keep_loaded_s,
                 },
-                timeout=180.0,
+                timeout=15.0,
             )
         except Exception:
             pass
@@ -496,6 +766,11 @@ class Polisher:
         if not self.available:
             self.probe_soon()
             return raw, 0.0, self.reason
+        # The model may have been swapped since the last take. Asking for one
+        # that is no longer in memory would make LM Studio load it.
+        if not self.still_loaded():
+            self.probe_soon()
+            return raw, 0.0, self.reason
 
         t0 = time.perf_counter()
         body = {
@@ -510,9 +785,9 @@ class Polisher:
             # The proper way to switch off "thinking out loud" in models that
             # support it. Models that do not simply ignore the field.
             "chat_template_kwargs": {"enable_thinking": False},
-            # Ask LM Studio not to unload the model from VRAM immediately:
-            # otherwise the first take after a pause waits 2 seconds for it.
-            "ttl": self.keep_loaded_s,
+            # No "ttl" here on purpose. It sets an idle timer on the model, and
+            # the model in memory is the owner's, not ours: he asked for it to
+            # stay loaded always (2026-08-20). Nothing we send may unload it.
         }
         try:
             r = self._client.post(
@@ -523,6 +798,12 @@ class Polisher:
         except Exception as exc:
             self.available = False
             self.reason = f"{type(exc).__name__}"
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (401, 403):
+                # /v1/models answers without a key, so the liveness check cannot see this;
+                # only a real request can. Hold the verdict for 5 minutes instead of flapping.
+                self.reason = "server rejected the key (check [polish] api_key_file)"
+                self._next_check = time.time() + 300.0
             return raw, time.perf_counter() - t0, f"failed: {self.reason}"
 
         took = time.perf_counter() - t0

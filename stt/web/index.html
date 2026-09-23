@@ -113,6 +113,13 @@
   .take.bad{border-left-color:var(--bad)}
   .take.bad .txt{color:var(--dim)}
   .tc{font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:3px}
+  /* Время — оно же кнопка «дай метку». Выглядит как текст, пока не наведёшь. */
+  .stamp{
+    font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+  }
+  .stamp:hover{color:var(--amber);text-decoration:underline}
+  /* Куда привела ссылка вида .../#2026-08-29_085812-156 */
+  .take.pinned{background:var(--raise);border-left-color:var(--amber)}
   /* Полоска длины реплики — сколько ты говорил. */
   .len{padding-top:9px}
   .len i{display:block;height:3px;background:var(--amber-dim);border-radius:2px}
@@ -334,6 +341,34 @@ function play(id){
   player.src = '/api/audio?id=' + encodeURIComponent(id);
   player.play().catch(()=>toast('No audio for this take'));
 }
+/* Метка надиктовки: строчка, которую можно вставить в переписку и по которой
+   потом находится ровно эта запись — и её текст, и её звук в recordings/.
+   Появилась 29.08.2026: без неё разговор о конкретной надиктовке шёл
+   пересказом («там где было про будильник»), и найти её в трёх с половиной
+   тысячах записей было нечем. */
+async function copyRef(r){
+  const url = location.origin + '/#' + r.id;
+  await copy(`${url}\n[${r.id}] ${(r.seconds||0).toFixed(1)}с — «${r.text}»`);
+  toast('Метка скопирована — вставляй');
+}
+
+/* Открыли страницу со ссылкой вида .../#2026-08-29_085812-156 — подсветить
+   и подкрутить к этой записи. Так ссылка работает в обе стороны: и я её
+   присылаю, и она приводит куда надо. */
+let pinned = (location.hash || '').replace(/^#/, '') || null;
+function goToPinned(){
+  if(!pinned) return;
+  const el = document.getElementById('t-' + pinned);
+  if(!el) return;
+  el.scrollIntoView({block:'center'});
+  pinned = null;                 // подсветка одноразовая, дальше не мешает
+  setTimeout(() => { const p = $('.take.pinned'); if(p) p.classList.remove('pinned'); }, 4000);
+}
+window.addEventListener('hashchange', () => {
+  pinned = (location.hash || '').replace(/^#/, '') || null;
+  render(); goToPinned();
+});
+
 async function copy(text){
   try{ await navigator.clipboard.writeText(text); toast('Copied'); }
   catch(e){ toast('Could not copy - select it and press Ctrl+C'); }
@@ -385,11 +420,13 @@ function render(){
     const body = editing
       ? `<textarea data-edit="${r.id}" rows="3">${esc(r.text)}</textarea>`
       : `<div class="txt${r.corrected?' edited':''}" data-open="${r.id}">${esc(r.text)||'<span style="color:var(--faint)">empty</span>'}</div>`;
-    return `<div class="take${r.bad?' bad':''}">
-      <div class="tc">${hhmm(r.time)}</div>
+    return `<div class="take${r.bad?' bad':''}${r.id===pinned?' pinned':''}" id="t-${r.id}">
+      <div class="tc"><button class="stamp" data-ref="${r.id}"
+        title="Скопировать метку этой надиктовки — её можно вставить в переписку">${hhmm(r.time)}</button></div>
       <div class="len"><i style="width:${w}px"></i><span>${(r.seconds||0).toFixed(1)}с</span></div>
       <div>${body}</div>
       <div class="acts">
+        <button class="ico" data-ref="${r.id}" title="Скопировать метку: её можно прислать, и по ней найдётся эта самая запись">метка</button>
         <button class="ico" data-copy="${r.id}" title="Copy">copy</button>
         ${r.has_audio?`<button class="ico" data-play="${r.id}" title="Listen">audio</button>`:''}
         <button class="ico${r.bad?' on':''}" data-bad="${r.id}" title="Mark as badly recognized">bad</button>
@@ -413,8 +450,11 @@ function setOffline(yes, why){
 async function load(){
   if(editingId) return;                       // do not yank text from under the cursor
   try{
-    const q = $('#q').value.trim();
-    const bad = $('#onlybad').checked ? '1' : '0';
+    // Пришли по ссылке на конкретную надиктовку — ищем именно её. Иначе запись
+    // недельной давности просто не попадёт в последние 300 и ссылка приведёт
+    // в пустоту.
+    const q = pinned || $('#q').value.trim();
+    const bad = pinned ? '0' : ($('#onlybad').checked ? '1' : '0');
     records = await api(`/api/records?limit=300&q=${encodeURIComponent(q)}&bad=${bad}`);
     const s = await api('/api/stats');
 
@@ -424,6 +464,7 @@ async function load(){
 
     setOffline(false);
     render();
+    goToPinned();
     $('#stats').innerHTML =
         `<span><b>${s.records}</b> takes</span>`
       + `<span><b>${s.minutes}</b> min of speech</span>`
@@ -441,9 +482,11 @@ async function load(){
 
 /* --- events --- */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-copy],[data-play],[data-bad],[data-open],[data-save],[data-model],.tab');
+  const t = e.target.closest('[data-ref],[data-copy],[data-play],[data-bad],[data-open],[data-save],[data-model],.tab');
   if(!t) return;
-  if(t.dataset.copy !== undefined){
+  if(t.dataset.ref !== undefined){
+    const r = records.find(x=>x.id===t.dataset.ref); if(r) copyRef(r);
+  } else if(t.dataset.copy !== undefined){
     const r = records.find(x=>x.id===t.dataset.copy); if(r) copy(r.text);
   } else if(t.dataset.play !== undefined){ play(t.dataset.play);
   } else if(t.dataset.bad !== undefined){

@@ -9,6 +9,8 @@ import re
 import threading
 from pathlib import Path
 
+from . import endings
+
 
 # A replacement starting with a lowercase Cyrillic letter is an ordinary word,
 # not a name that carries its own spelling.
@@ -84,7 +86,7 @@ class Fixes:
     def add(self, src: str, dst: str, origin: str = "auto") -> bool:
         """Adds a pair. Returns True if the pair is new.
 
-        Two kinds of pair are refused outright — both have corrupted text before:
+        Four kinds of pair are refused outright — all of them corrupted text before:
 
         - the two sides differ only by "е"/"ё" AND the machine proposed it.
           "все" (everybody) and "всё" (everything) are different words; swapping
@@ -93,12 +95,26 @@ class Fixes:
           A human may still add such a pair by hand.
         - the reverse pair already exists. This happened: "все -> всё" AND
           "всё -> все" sat side by side and fought, breaking text both ways.
+        - the two sides are forms of one verb. An order and a promise differ by
+          one ending, and only the sentence around them says which is right. On
+          2026-08-25 "делай -> делаю" got in and every order the owner dictated
+          would have come out as a report about himself.
+        - the left side is an ordinary Russian verb. A verb is never a mangled
+          foreign term: "сесть -> сессия" turned "самое время сесть нам с тобой"
+          into "самое время сессия нам с тобой" on 2026-08-20.
+
+        The last two hold for a hand-made pair as well. There is no phrasing of
+        them that is right in every sentence, and a blind dictionary has only
+        one sentence: all of them. Editing fixes.tsv in a text editor still
+        works — that is the way out, and it is a deliberate one.
         """
         src, dst = src.strip(), dst.strip()
         if not src or not dst or src.lower() == dst.lower():
             return False
         key = src.lower()
         if origin == "auto" and yo_key(key) == yo_key(dst):
+            return False
+        if endings.touches_verb_form(src, dst) or endings.is_known_verb(src):
             return False
         with self._lock:
             back = self.pairs.get(dst.lower())
@@ -114,6 +130,27 @@ class Fixes:
             self._rebuild()
             self._save_locked()
         return new
+
+    def suspect_pairs(self) -> list[tuple[str, str, str]]:
+        """Pairs in the file that add() would refuse today.
+
+        load() does not filter: a line written by hand, or left over from an
+        older version, works exactly like any other. So the bans below can only
+        be enforced at the door, and this is the way to see what is already
+        inside. Reported at startup, never removed on its own — the file is the
+        owner's.
+        """
+        out = []
+        with self._lock:
+            pairs = dict(self.pairs)
+        for key, (dst, _hits, _origin) in sorted(pairs.items()):
+            if endings.touches_verb_form(key, dst):
+                out.append((key, dst, "two forms of one verb"))
+            elif endings.is_known_verb(key):
+                out.append((key, dst, "the left side is an ordinary Russian verb"))
+            elif pairs.get(dst.lower(), ("",))[0].lower() == key:
+                out.append((key, dst, "the reverse pair is in the file too"))
+        return out
 
     def _save_locked(self) -> None:
         lines = [

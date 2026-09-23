@@ -66,7 +66,11 @@ def records(limit: int = 200, query: str = "", only_bad: bool = False) -> list[d
         if only_bad and not mark.get("bad"):
             continue
         if query:
-            hay = f"{text} {rec.get('raw','')}".lower()
+            # The id is searchable too, so that the label copied off the page
+            # (and pasted into a conversation) leads back to this exact take —
+            # including one from a week ago, which the last few hundred rows
+            # would never contain.
+            hay = f"{text} {rec.get('raw','')} {rec['id']}".lower()
             if query.lower() not in hay:
                 continue
         out.append(

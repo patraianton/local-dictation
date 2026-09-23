@@ -53,6 +53,18 @@ CASES = [
         "anything the model added on its own is dropped",
     ),
     (
+        "Там Bitrix, GoHighLevel и так далее.",
+        "Там Bitrix, GoHighLevel, Salesforce, HubSpot, Pipedrive, Zoho, и так далее.",
+        "Там Bitrix, GoHighLevel и так далее.",
+        "glossary terms the speaker never said are not written into his CV",
+    ),
+    (
+        "А, и у меня был handover для запуска.",
+        "А, и у меня был session handover для запуска.",
+        "А, и у меня был handover для запуска.",
+        "a term is not grown into a longer one out of nothing",
+    ),
+    (
         "Моя задача получить митинги для клиента для медмаркета компании.",
         "Моя задача — получить митинги для клиента, для China Cars marketplace компании.",
         "Моя задача — получить митинги для клиента, для медмаркета компании.",
@@ -213,8 +225,8 @@ CASES = [
     (
         "Пришли мне ключи?",
         "Пришли мне ключи?",
-        "Пришли мне ключи.",
-        "but with no subject it is an order: the mark goes, even from the recognizer",
+        "Пришли мне ключи?",
+        "an order, but the recognizer heard the mark: reversed 22.08, see rule 5",
     ),
     # --- a mark the corrector invented with nothing to go on ---
     (

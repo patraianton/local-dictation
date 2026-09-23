@@ -2,6 +2,7 @@
 #   .\run.ps1            — run it
 #   .\run.ps1 mics       — list the microphones
 #   .\run.ps1 keytest    — find the scan code of a key
+#   .\run.ps1 bindtoggle — press a button, it becomes start/stop without holding
 #   .\run.ps1 selftest   — check everything is in place
 #   .\run.ps1 bench x.wav
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path

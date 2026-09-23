@@ -21,7 +21,10 @@ What actually works, measured on 383 takes:
    the lock in polish.py lets that single substitution through and nothing
    else. Measured: fixes 2 more cases out of 5 and never breaks the ones where
    the speaker really is talking about themselves.
-3. You: Shift+F13, or an edit on the page — the pair is then remembered forever.
+3. You: Shift+F13, or an edit on the page. This fixes the take in front of you
+   and nothing else — a verb pair is NOT remembered, in either direction. It
+   cannot be: which form is right is decided by the sentence, and a dictionary
+   has only one sentence, all of them. See fixes.py::add.
 
 What does NOT work, and why (so nobody tries again):
 - The blind verb-list rule (apply() below): 10 hits, 5 of them wrong.
@@ -343,14 +346,112 @@ def starts_with_subordinate(sentence: str) -> bool:
     return words[0].lower() in SUBORDINATE
 
 
-def flip_allowed(said: str, other: str) -> bool:
-    """May the corrector make this substitution: are these two forms of one verb?
+_EDGE_PUNCT_RE = re.compile(r"^\W+|\W+$", re.UNICODE)
 
-    Only "сделаю" <-> "сделай" and the like, from the PAIRS list, in either
-    direction. The lock rolls back everything else.
+# Every word that takes part in the order/promise pairs, both columns.
+_PAIR_WORDS = set(PAIRS) | set(PAIRS.values())
+
+
+def bare(word: str) -> str:
+    """The word without the punctuation stuck to its edges.
+
+    Needed because every check below has to survive a comma: the corrector
+    moves punctuation around, and "делай," must not read as a different word
+    from "делай" — otherwise the comma alone carries the pair past the guard.
     """
-    a, b = said.lower(), other.lower()
-    return PAIRS.get(a) == b or PAIRS.get(b) == a
+    return _EDGE_PUNCT_RE.sub("", word.lower())
+
+
+@lru_cache(maxsize=4096)
+def is_known_verb(word: str) -> bool:
+    """An ordinary Russian verb that the dictionary of the language knows.
+
+    Deliberately narrow: it is the VERB that is asked about, not "is this a
+    real Russian word". "кодекс", "клод", "луп", "гемма" are real words too and
+    they are exactly what the replacement dictionary is for. "сесть" is not —
+    it is a verb, and a verb on the left side of a replacement is always a
+    misfire. Measured over the 393 one-word pairs in fixes.tsv: this rejects
+    exactly one, "сесть -> сессия", which broke "самое время сесть нам с тобой"
+    into "самое время сессия нам с тобой" on 2026-08-20.
+    """
+    if _MORPH is None:
+        return False
+    w = bare(word)
+    if not w.isalpha():
+        return False
+    parses = _MORPH.parse(w)
+    if not parses:
+        return False
+    top = parses[0]
+    return ("VERB" in top.tag or "INFN" in top.tag) and top.is_known
+
+
+@lru_cache(maxsize=4096)
+def _verb_lemma(word: str) -> str | None:
+    """The verb this word is a form of, or None if it is not a verb at all.
+
+    Every parse is looked at, not just the top one. This check exists to STOP
+    something, so a doubt has to count against the pair, not for it.
+    """
+    if _MORPH is None or not word.isalpha():
+        return None
+    for p in _MORPH.parse(word.lower()):
+        if "VERB" in p.tag or "INFN" in p.tag:
+            return p.normal_form
+    return None
+
+
+def same_verb(said: str, other: str) -> bool:
+    """Are these two different forms of one and the same verb.
+
+    Such a pair must never enter the blind dictionary, in either direction.
+    Which form is right is decided by the meaning of the whole sentence, not by
+    the word: "я всё сделаю" and "ты всё сделай" differ by one letter and mean
+    opposite things. Measured over 377 takes: a rule driven by a verb list
+    fired 10 times and was wrong 5 of them.
+    """
+    a, b = bare(said), bare(other)
+    if not a or not b or a == b or " " in a or " " in b:
+        return False
+    if PAIRS.get(a) == b or PAIRS.get(b) == a:
+        return True
+    la, lb = _verb_lemma(a), _verb_lemma(b)
+    return bool(la) and la == lb
+
+
+def touches_verb_form(src: str, dst: str) -> bool:
+    """Does this pair move a verb between an order and a promise.
+
+    Checked word by word, because the corrector rewrites a verb together with
+    whatever stands next to it, and a chunk compared as a whole walks straight
+    past the guard: "все делай" -> "всё делаю" is not one word, so a one-word
+    check never sees the verb inside it.
+    """
+    a = [w for w in (bare(x) for x in src.split()) if w]
+    b = [w for w in (bare(x) for x in dst.split()) if w]
+    if not a or not b:
+        return False
+    if len(a) == len(b):
+        return any(same_verb(x, y) for x, y in zip(a, b))
+    # The words cannot be lined up one to one, so nothing can be judged
+    # sensibly: any verb from the list anywhere inside is enough to refuse.
+    return any(w in _PAIR_WORDS for w in a + b)
+
+
+def flip_allowed(said: str, other: str) -> bool:
+    """May the corrector make this substitution: was an order heard as a promise?
+
+    ONE direction only, and that is the whole point: from what the recognizer
+    WROTE (first person, "сделаю") to what was MEANT (the imperative, "сделай").
+    Never the other way round.
+
+    Both directions used to be allowed. On 2026-08-25 the owner said "Все сам
+    делай" ("do it all yourself"), the recognizer heard it correctly, and the
+    corrector turned it into "Все сам делаю" ("I am doing it all myself") — the
+    opposite instruction, handed to an agent. Measured over 2196 takes: the
+    backwards direction broke 4 phrases and fixed none, the forward one fixed 1.
+    """
+    return PAIRS.get(said.lower()) == other.lower()
 
 
 def apply(text: str) -> tuple[str, list[tuple[str, str]]]:
