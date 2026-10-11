@@ -144,8 +144,8 @@ class Fixes:
           2026-08-25 "делай -> делаю" got in and every order the owner dictated
           would have come out as a report about himself.
         - the left side is an ordinary Russian verb. A verb is never a mangled
-          foreign term: "сесть -> сессия" turned "самое время сесть нам с тобой"
-          into "самое время сессия нам с тобой" on 2026-08-20.
+          foreign term: "сесть -> сессия" turned "пора нам сесть за стол"
+          into "пора нам сессия за стол" on 2026-08-20.
 
         The last two hold for a hand-made pair as well. There is no phrasing of
         them that is right in every sentence, and a blind dictionary has only

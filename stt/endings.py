@@ -218,7 +218,7 @@ ASK_RE = re.compile(
 # Morphological analysis against a Russian dictionary. Needed to recognize an
 # imperative by its form rather than from a list: a hand-written list will
 # always have holes — that is exactly why the corrector stuck a question mark on
-# "Переводи их на ажур" on 2026-08-14.
+# "Раскладывай их по полкам" on 2026-08-14.
 # If the library is missing, fall back to the list as before. Dictation still
 # works either way.
 try:
@@ -315,17 +315,17 @@ def starts_with_command(sentence: str) -> bool:
 
     The test: the imperative verb stands EARLIER than the question word.
 
-        "Ты мне скажи, какие журналы ты читал"  — an order (скажи < какие)
-        "Какие журналы ты читал?"               — a question (no imperative)
+        "Ты мне скажи, какие грядки ты поливал"  — an order (скажи < какие)
+        "Какие грядки ты поливал?"               — a question (no imperative)
 
     Why word order rather than the first word. An order can sit anywhere: at the
-    start ("Переводи их на ажур"), after a filler ("Хорошо, ставь CRM
-    мониторить"), or at the end ("У нас есть ролик про Bitrix, найди его").
+    start ("Раскладывай их по полкам"), after a filler ("Хорошо, ставь таймер
+    на полив"), or at the end ("У нас есть видео про Excel, найди его").
     A question word inside an order is not a question but a statement of WHAT
     exactly to do: "объясни мне, когда будет результат".
 
     The price, chosen deliberately by the owner on 2026-08-14: the mark is also
-    removed from polite requests such as "Посчитай, сколько их у нас?" — 28 out
+    removed from polite requests such as "Посчитай, сколько их на полке?" — 28 out
     of 327 sentences carrying a question mark. Reason: a question mark on an
     order makes an agent ask back instead of doing the work.
     """
@@ -339,7 +339,7 @@ def starts_with_command(sentence: str) -> bool:
             # An imperative never has a subject before it in the same
             # clause: "Деньги пришли?", "Все ключи уже пришли?" are past tense,
             # not "send me the keys". Only ambiguous words are checked;
-            # otherwise "Ещё раз объясни мне" would hide behind "раз", and
+            # otherwise "Ещё раз объясни" would hide behind "раз", and
             # "Ты мне скажи" behind "ты".
             if _impr_and_past(word) and _has_subject_before(sentence, m.start()):
                 continue
@@ -424,7 +424,7 @@ def is_comparative(word: str) -> bool:
 
 
 # Conjunctions that start not a separate thought but the tail of the previous
-# one: "Сделай мне CSV. Чтобы я мог спотчекнуть, как они выглядят."
+# one: "Сделай мне CSV. Чтобы я мог заранее прикинуть, сколько влезет в коробку."
 # Such a sentence cannot be a question, and a mark on it is a corrector error
 # (a real case from 2026-08-14, marked bad by the owner). There is almost always
 # a question word inside ("как", "что"), so the ASK_RE test used for orders is
@@ -469,8 +469,8 @@ def is_known_verb(word: str) -> bool:
     they are exactly what the replacement dictionary is for. "сесть" is not —
     it is a verb, and a verb on the left side of a replacement is always a
     misfire. Measured over the 393 one-word pairs in fixes.tsv: this rejects
-    exactly one, "сесть -> сессия", which broke "самое время сесть нам с тобой"
-    into "самое время сессия нам с тобой" on 2026-08-20.
+    exactly one, "сесть -> сессия", which broke "пора нам сесть за стол"
+    into "пора нам сессия за стол" on 2026-08-20.
     """
     if _MORPH is None:
         return False

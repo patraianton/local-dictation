@@ -16,14 +16,14 @@ from stt.polish import flip_question  # noqa: E402
 # (what was pasted, what it must become, how many to erase, what to type, why)
 CASES = [
     (
-        "Скоро это уже закончится.",
-        "Скоро это уже закончится?",
+        "Скоро эта смена уже закончится.",
+        "Скоро эта смена уже закончится?",
         1, "?",
         "full stop becomes a question mark: the main case",
     ),
     (
-        "Переводи их на ажур?",
-        "Переводи их на ажур.",
+        "Раскладывай их по полкам?",
+        "Раскладывай их по полкам.",
         1, ".",
         "and back: the same key removes a false question mark",
     ),

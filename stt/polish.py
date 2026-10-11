@@ -473,8 +473,8 @@ def constrain(
     out.append(pol_parts[-1] if len(pol_parts) > 1 else "")
     text = re.sub(r"[ \t]{2,}", " ", "".join(out)).strip()
     # A dash opening the text is the corrector reading the take as a line
-    # of dialogue: "Все дело, не надо было" came back as "— Всё дело — не
-    # надо было" (22.08.2026). Dictation is never dialogue.
+    # of dialogue: "Все готово, пора ехать" came back as "— Всё готово —
+    # пора ехать" (22.08.2026). Dictation is never dialogue.
     if text[:1] in DASHES and raw.lstrip()[:1] not in DASHES:
         text = text[1:].lstrip()
     # And a dash doubled onto one the speaker had already said.
@@ -612,7 +612,7 @@ def flip_question(text: str) -> tuple[str, int, str]:
     Returns: the new text, how many characters to erase in the already-pasted
     text, and what to type instead.
 
-    Needed because "Скоро это уже закончится" and "Скоро это уже закончится?"
+    Needed because "Скоро эта смена уже закончится" and "Скоро эта смена уже закончится?"
     are the same words: only the voice tells them apart, and the voice does not
     carry the signal (measured 2026-08-14 on 347 takes — 2 caught out of 117).
     """
@@ -644,11 +644,11 @@ def no_false_question(raw: str, text: str) -> str:
 
     Three reasons to drop the mark:
 
-    1. It is an order: "Ты мне скажи, какие журналы ты читал?" — the imperative
+    1. It is an order: "Ты мне скажи, какие грядки ты поливал?" — the imperative
        verb stands earlier than the question word. A question mark on an order
        makes an agent ask back instead of doing the work.
-    2. It is the tail of a previous thought: "Чтобы я мог спотчекнуть, как они
-       выглядят?".
+    2. It is the tail of a previous thought: "Чтобы я мог заранее прикинуть, сколько
+       влезет в коробку?".
     3. The corrector invented the mark with nothing to go on: the recognizer did
        not hear a question AND there is no question word in the text.
 
@@ -670,16 +670,16 @@ def no_false_question(raw: str, text: str) -> str:
     failures in a single day, all of them on takes where the recognizer heard no
     question at that spot at all:
 
-        heard "…а это где-то внизу закопано."   ->  "…внизу закопано?"
+        heard "…а это где-то под полкой лежит."   ->  "…под полкой лежит?"
         heard "…когда страница рефрешена."      ->  "…рефрешена?"
-        heard "…чтобы я в другой сессии тоже это мог запустить?"
-                          ->  "…чтобы я в другой сессии? тоже это мог запустить?"
+        heard "…чтобы я в другой комнате тоже это мог услышать?"
+                          ->  "…чтобы я в другой комнате? тоже это мог услышать?"
 
     Over the 227 takes since rule 3 landed the corrector added 7 marks; 5 of
     them were wrong. So the count is capped now: the result may not carry more
     question marks than the recognizer heard. Which of them survive is decided
     by how well a sentence matches a raw sentence that really ended with "?" —
-    that is what keeps the mark on "…мог запустить?" and takes it off the
+    that is what keeps the mark on "…мог услышать?" and takes it off the
     invented split in the middle.
 
     The price is the questions the recognizer misses entirely: 33 of 43 instead
@@ -690,8 +690,8 @@ def no_false_question(raw: str, text: str) -> str:
     recognizer had heard, so every question shaped as a request lost its mark:
 
         heard "Выясни, кто за ночь пытался авторизировать Linear?"
-        heard "Скажи, ты читал какой-то handover документ?"
-        heard "Посмотри, с чем может быть связано ухудшение качества диктовки?"
+        heard "Скажи, ты видел какой-то складской отчёт?"
+        heard "Посмотри, с чем может быть связана задержка поставки на склад?"
 
     All three came back as full stops. This reverses the 14.08 decision that
     "an order stays an order even with a heard mark". The reason it was made —
@@ -794,16 +794,16 @@ def _tail_key(sentence: str, words: int = 3) -> str:
 CLAUSE_BREAK_RE = re.compile(r",\s*(?:а|но|и|да)\s", re.IGNORECASE | re.UNICODE)
 
 # How far into the sentence the question word may stand. Six words is measured,
-# not guessed: "Только опять я не понимаю, почему тебе нужен мой компьютер?" —
+# not guessed: "Только опять я не знаю, почему тебе нужна моя лопата?" —
 # a real restored question from 15.08 — carries five words before "почему".
-# Seven would let back "Можно сделать как-то, чтобы не мелькали, когда страница
-# рефрешена?", where "когда" is the eighth word and no question is being asked.
+# Seven would let back "Можно сделать как-то, чтобы не шумели, когда начнётся
+# ремонт?", where "когда" is the eighth word and no question is being asked.
 ASK_WITHIN_WORDS = 6
 
 # "Что" and "как" are question words at the head of a sentence and ordinary
 # conjunctions after a comma — and in this speaker's dictation the second is
-# what they nearly always are: "вот тут написано, что у тебя memory missing",
-# "разбирайся, что с ним не так" (an order). So after a comma these two alone
+# what they nearly always are: "вот тут написано, что у тебя ключ потерян",
+# "разбирайся, что с насосом не так" (an order). So after a comma these two alone
 # do not open the loophole. Measured over the takes from 20.08.2026 on: 5 marks
 # that should not have been there go, 3 real questions go with them. The owner
 # chose that trade on 2026-08-25 — a wrong mark makes an agent ask back instead
@@ -816,9 +816,9 @@ SOFT_ASK = {"что", "как"}
 # Words a person opens their mouth with before the thought starts: they carry
 # no meaning of their own, and the comma after them is not a clause break.
 # Until 10.09.2026 they were treated as one, and that alone killed a whole
-# question three days running — the owner asked "Хорошо, как скоро мы это
-# закончим?" three times in a row, each time got a full stop, and each time
-# said it again. The corrector had it right ("Как скоро мы это закончим?"); the
+# question three days running — the owner asked "Хорошо, как скоро приедет
+# курьер?" three times in a row, each time got a full stop, and each time
+# said it again. The corrector had it right ("Как скоро приедет курьер?"); the
 # rollback of the dropped "Хорошо," put "как" after a comma, and the rule above
 # then read it as a conjunction.
 FILLERS = {
@@ -997,9 +997,9 @@ def cap_questions(raw: str, text: str) -> str:
     way as a raw sentence that carried a mark, then the ones opening with a
     question word, then the ones that only end that way, then left to right.
 
-    The order matters. "Что у тебя есть, я тебе сейчас буду делать?" — the
+    The order matters. "Что там у нас, я вам сейчас буду паковать?" — the
     recognizer put its single mark at the very end of a run-on, and the corrector
-    split it in two. By the tail the mark belongs to "…буду делать", but the
+    split it in two. By the tail the mark belongs to "…буду паковать", but the
     question is the first half. The opening word knows better than the tail.
     The first rank is the exception, added on 01.10.2026: a sentence that has a
     question word AND sits exactly where the mark was heard is the heard

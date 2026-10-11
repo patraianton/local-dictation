@@ -798,7 +798,7 @@ class Asr:
 
         The recognizer writes the final mark itself, in one pass, and whatever
         it decided is what stays — a question said without a question word
-        ("Мы ссылки сделали на эти статьи?") comes out as a statement. But it
+        ("Мы коробки сложили на эти полки?") comes out as a statement. But it
         can be asked differently: give it the SAME phrase twice, once ending in
         "." and once in "?", and make it read both against the recording. It
         returns how well each version agrees with the sound. The difference is

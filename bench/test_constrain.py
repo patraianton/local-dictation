@@ -16,9 +16,9 @@ ALLOWED = allowed_words(TERMS)
 # (what was said, what the corrector returned, what must come out, why)
 CASES = [
     (
-        "И где лежит его доки?",
-        "Где лежат его документы?",
-        "И где лежит его доки?",
+        "И где лежит её тетрадь?",
+        "Где находится её тетрадь?",
+        "И где лежит её тетрадь?",
         "do not change words, and do not drop the leading conjunction",
     ),
     (
@@ -28,15 +28,15 @@ CASES = [
         "keep the slang intact, but take GitHub capitalized",
     ),
     (
-        "Спланируй новых статей и ссылок на акме паса, причем на главную.",
-        "Спланируй новые статьи и ссылки на AcmePass, причём на главную.",
-        "Спланируй новых статей и ссылок на AcmePass, причём на главную.",
+        "Спланируй новых грядок и дорожек на акме паса, причем у забора.",
+        "Спланируй новые грядки и дорожки на AcmePass, причём у забора.",
+        "Спланируй новых грядок и дорожек на AcmePass, причём у забора.",
         "a term may be substituted, grammar may not be edited",
     ),
     (
-        "открой chrome extension я тебе открыл github сделай там себе токены",
-        "Открой Chrome Extension, я тебе открыл GitHub. Сделай там себе токены.",
-        "Открой Chrome Extension, я тебе открыл GitHub. Сделай там себе токены.",
+        "открой github вот я тебе скачал chrome extension заведи там себе профиль",
+        "Открой GitHub, вот я тебе скачал Chrome Extension. Заведи там себе профиль.",
+        "Открой GitHub, вот я тебе скачал Chrome Extension. Заведи там себе профиль.",
         "punctuation and capitals are taken wholesale",
     ),
     (
@@ -55,15 +55,15 @@ CASES = [
         "anything the model added on its own is dropped",
     ),
     (
-        "Там Bitrix, GoHighLevel и так далее.",
-        "Там Bitrix, GoHighLevel, Salesforce, HubSpot, Pipedrive, Zoho, и так далее.",
-        "Там Bitrix, GoHighLevel и так далее.",
+        "Там Excel, Notion и так далее.",
+        "Там Excel, Notion, Slack, Trello, Zoom, Figma, и так далее.",
+        "Там Excel, Notion и так далее.",
         "glossary terms the speaker never said are not written into the text",
     ),
     (
-        "А, и у меня был handover для запуска.",
-        "А, и у меня был session handover для запуска.",
-        "А, и у меня был handover для запуска.",
+        "А, и у меня был worktree для сборки.",
+        "А, и у меня был new worktree для сборки.",
+        "А, и у меня был worktree для сборки.",
         "a term is not grown into a longer one out of nothing",
     ),
     (
@@ -85,9 +85,9 @@ CASES = [
         "one glossary term must not be swapped for another",
     ),
     (
-        "Мне не обязательно попадать в ту же сессию.",
-        "Мне не обязательно попадать в ту же session.",
-        "Мне не обязательно попадать в ту же сессию.",
+        "Нам не обязательно ехать в тот же магазин.",
+        "Нам не обязательно ехать в тот же shop.",
+        "Нам не обязательно ехать в тот же магазин.",
         "an ordinary word must not be translated into a term",
     ),
     (
@@ -115,9 +115,9 @@ CASES = [
         "the corrector may add a full stop at the end",
     ),
     (
-        "Чтобы я мог спотчекнуть, как они все выглядят.",
-        "Чтобы я мог спотчекнуть, как они все выглядят?",
-        "Чтобы я мог спотчекнуть, как они все выглядят.",
+        "Чтобы я мог заранее прикинуть, сколько влезет в коробку.",
+        "Чтобы я мог заранее прикинуть, сколько влезет в коробку?",
+        "Чтобы я мог заранее прикинуть, сколько влезет в коробку.",
         "a subordinate clause is the tail of a thought, not a question",
     ),
     (
@@ -139,9 +139,9 @@ CASES = [
         "only the second sentence loses its mark; the first is untouched",
     ),
     (
-        "Переводи их на ажур.",
-        "Переводи их на ажур?",
-        "Переводи их на ажур.",
+        "Раскладывай их по полкам.",
+        "Раскладывай их по полкам?",
+        "Раскладывай их по полкам.",
         "an imperative is recognized by morphology, even if it is not in the list",
     ),
     (
@@ -151,15 +151,15 @@ CASES = [
         "and another imperative that is also missing from the list",
     ),
     (
-        "Можешь мне это как-то объяснить?",
-        "Можешь мне это как-то объяснить?",
-        "Можешь мне это как-то объяснить?",
+        "Можешь мне эту полку подвинуть?",
+        "Можешь мне эту полку подвинуть?",
+        "Можешь мне эту полку подвинуть?",
         "a modal is not an imperative: a real question is left alone",
     ),
     (
-        "Есть какие-то данные по машинам?",
-        "Есть какие-то данные по машинам?",
-        "Есть какие-то данные по машинам?",
+        "Есть какие-то остатки по складам?",
+        "Есть какие-то остатки по складам?",
+        "Есть какие-то остатки по складам?",
         "the verb to be is not an imperative: a real question is left alone",
     ),
     (
@@ -169,9 +169,9 @@ CASES = [
         "a plural noun is not treated as an imperative",
     ),
     (
-        "Хорошо, ставь CRM в раз в сутки мониторить.",
-        "Хорошо, ставь CRM в раз в сутки мониторить?",
-        "Хорошо, ставь CRM в раз в сутки мониторить.",
+        "Хорошо, ставь таймер на полив раз в сутки.",
+        "Хорошо, ставь таймер на полив раз в сутки?",
+        "Хорошо, ставь таймер на полив раз в сутки.",
         "a filler word does not hide the imperative",
     ),
     (
@@ -181,34 +181,34 @@ CASES = [
         "several fillers in a row do not hide it either",
     ),
     (
-        "Так у тебя есть работа?",
-        "Так у тебя есть работа?",
-        "Так у тебя есть работа?",
+        "Так у тебя есть ключ?",
+        "Так у тебя есть ключ?",
+        "Так у тебя есть ключ?",
         "no imperative at all: a real question is left alone",
     ),
     # --- an order with a question inside: the mark goes (chosen 2026-08-14) ---
     (
-        "Ты мне скажи, какие журналы ты их читал.",
-        "Ты мне скажи, какие журналы ты их читал?",
-        "Ты мне скажи, какие журналы ты их читал.",
+        "Ты мне скажи, какие грядки ты их поливал.",
+        "Ты мне скажи, какие грядки ты их поливал?",
+        "Ты мне скажи, какие грядки ты их поливал.",
         "imperative before the question word: this is an order",
     ),
     (
-        "Ещё раз объясни мне, о каких журналах говорил я.",
-        "Ещё раз объясни мне, о каких журналах говорил я?",
-        "Ещё раз объясни мне, о каких журналах говорил я.",
+        "Ещё раз покажи нам, о каких грядках говорил я.",
+        "Ещё раз покажи нам, о каких грядках говорил я?",
+        "Ещё раз покажи нам, о каких грядках говорил я.",
         "a noun before the imperative must not hide it",
     ),
     (
-        "У нас есть ролик про Bitrix на YouTube, найди его.",
-        "У нас есть ролик про Bitrix на YouTube, найди его?",
-        "У нас есть ролик про Bitrix на YouTube, найди его.",
+        "У нас есть видео про Excel на YouTube, найди его.",
+        "У нас есть видео про Excel на YouTube, найди его?",
+        "У нас есть видео про Excel на YouTube, найди его.",
         "an imperative at the end counts too",
     ),
     (
-        "Какие журналы ты их читал.",
-        "Какие журналы ты их читал?",
-        "Какие журналы ты их читал?",
+        "Какие грядки ты их поливал.",
+        "Какие грядки ты их поливал?",
+        "Какие грядки ты их поливал?",
         "question word before the imperative: a real question",
     ),
     # --- traps: words that are both an imperative and a past tense ---
@@ -232,21 +232,21 @@ CASES = [
     ),
     # --- a mark the corrector invented with nothing to go on ---
     (
-        "Что-то прям вообще последнее плохо стало.",
-        "Что-то прям вообще последнее плохо стало?",
-        "Что-то прям вообще последнее плохо стало.",
+        "Что-то прям вообще сегодня тихо стало.",
+        "Что-то прям вообще сегодня тихо стало?",
+        "Что-то прям вообще сегодня тихо стало.",
         "the recognizer heard no question and there is no question word: dropped",
     ),
     (
-        "Интернет опять еле живой.",
-        "Интернет опять еле живой?",
-        "Интернет опять еле живой.",
+        "Принтер снова еле дышит.",
+        "Принтер снова еле дышит?",
+        "Принтер снова еле дышит.",
         "here too the corrector invented a mark out of nothing",
     ),
     (
-        "Мы заливаем статьи уже?",
-        "Мы заливаем статьи уже?",
-        "Мы заливаем статьи уже?",
+        "Мы разгружаем коробки уже?",
+        "Мы разгружаем коробки уже?",
+        "Мы разгружаем коробки уже?",
         "the recognizer heard the question itself: the mark is trusted",
     ),
     (

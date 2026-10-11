@@ -25,19 +25,18 @@ from faster_whisper import WhisperModel  # noqa: E402
 
 EVAL = Path(__file__).resolve().parent / "eval-result.json"
 
-# Куски расшифровок, по которым находим нужные записи, и что должно выйти.
+# Записи (по имени файла в eval-result.json) и что должно выйти.
 WANT_IMPERATIVE = [
-    ("Сделай session handover", "сделай"),
-    ("то, что оборвалось, запускай", "запускай"),
-    ("отправляй opus панели", "отправляй"),
-    ("отгружай одну за одной", "отгружай"),
-    ("Продолжай", "продолжай"),
+    ("40a8ba73-90a5-4110-9d1e-d0d8d514672b.wav", "сделай"),
+    ("ee6041c0-ed20-4544-a327-fa729b8d7f02.wav", "запускай"),
+    ("5a0bb0f6-46e6-4ae9-8235-b1235f76d179.wav", "отправляй"),
+    ("72beac83-f218-43fb-b35c-9cbe2d7d7322.wav", "отгружай"),
+    ("a63d1b0c-3800-47d0-8a6e-9842ac684c2b.wav", "продолжай"),
 ]
 WANT_SELF = [
-    ("После отпуска схожу и посмотрю", "посмотрю"),
-    ("Запускаю запись контента", "запускаю"),
-    ("добавлю тебе, пока не забыл", "добавлю"),
-    ("Ещё добавлю тебе", "добавлю"),
+    ("a968717c-f8a9-4ead-8d9a-3f335410a257.wav", "посмотрю"),
+    ("a23211f7-2351-456f-a08e-f3f4f15ff773.wav", "запускаю"),
+    ("8f206e15-42ee-44df-b44b-de8a8055b360.wav", "добавлю"),
 ]
 
 TERMS = ", ".join(cfg_mod.glossary()[:45])
@@ -76,21 +75,19 @@ def main() -> None:
     data = json.loads(EVAL.read_text(encoding="utf-8"))
     recs = data["records"]
 
-    def find(fragment: str):
-        key = re.sub(r"\W+", " ", fragment.lower()).strip()
+    def find(name: str):
         for r in recs:
-            hay = re.sub(r"\W+", " ", r["elevenlabs"].lower())
-            if key in hay and Path(r["wav"]).exists():
+            if Path(r["wav"]).name == name and Path(r["wav"]).exists():
                 return r
         return None
 
     cases = []
-    for frag, want in WANT_IMPERATIVE:
-        r = find(frag)
+    for name, want in WANT_IMPERATIVE:
+        r = find(name)
         if r:
             cases.append((r, want, True))
-    for frag, want in WANT_SELF:
-        r = find(frag)
+    for name, want in WANT_SELF:
+        r = find(name)
         if r:
             cases.append((r, want, False))
     print(f"нашёл записей: {len(cases)} "

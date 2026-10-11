@@ -689,8 +689,8 @@ class Dictation:
     def on_flip_question(self) -> None:
         """Flips the final mark of the last take: full stop <-> question mark.
 
-        Why this is manual. "Скоро это уже закончится" and "Скоро это уже
-        закончится?" are the same words; only the voice differs. Measured
+        Why this is manual. "Скоро эта смена уже закончится" and "Скоро эта смена
+        уже закончится?" are the same words; only the voice differs. Measured
         2026-08-14: the voice carries no usable signal (2 out of 117 on real
         takes), and both feeding previous lines as context and asking the model
         directly made things worse. So the last word is the human's — but with

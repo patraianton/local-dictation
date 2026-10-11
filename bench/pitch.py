@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Can a question be heard in the voice: is there a difference in pitch.
 
-In text, "Мы заливаем статьи уже?" cannot be told from the statement — the only
+In text, "Мы разгружаем коробки уже?" cannot be told from the statement — the only
 difference is intonation. Checked on real recordings labelled by ElevenLabs:
 is the voice really doing something different at the end of a question.
 
