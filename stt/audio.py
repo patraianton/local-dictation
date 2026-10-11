@@ -196,6 +196,10 @@ class Recorder:
         self.last_error = ""
         self.last_preroll_s = 0.0     # of the take just handed over
         self._pending_preroll = 0.0   # of the take being recorded now
+        # Why and when the microphone was last let go, so that a take that
+        # starts with no pre-roll can say what took it (see Dictation.start).
+        self.closed_why = "not opened yet"
+        self.closed_at = time.perf_counter()
         self.xruns = 0                      # blocks Windows admits it dropped
         # When the driver reported a dropped block, and what it called it. The
         # running total above cannot say which TAKE was hit, so the take's own
@@ -373,10 +377,16 @@ class Recorder:
         return (self._stream is not None
                 and time.perf_counter() - self._last_block_at > max_gap_s)
 
-    def _close(self) -> None:
+    @property
+    def pending_preroll_s(self) -> float:
+        """Seconds of sound from before the press in the take being recorded."""
+        return self._pending_preroll
+
+    def _close(self, why: str = "closed") -> None:
         with _pa_lock:
             stream, self._stream = self._stream, None
             if stream is not None:
+                self.closed_why, self.closed_at = why, time.perf_counter()
                 try:
                     stream.stop()
                     stream.close()
@@ -441,13 +451,13 @@ class Recorder:
                     if self._stale():
                         self.log("the microphone stopped delivering sound — "
                                  "letting it go and looking for it again")
-                        self._close()
+                        self._close("it stopped delivering sound")
                     elif (self._stream is not None and self._standin()
                           and hot and may_hold
                           and now - self._relooked_at >= self.relook_s):
                         # On a stand-in: let it go so that _open() below can
                         # look for the wanted microphone.
-                        self._close()
+                        self._close("a stand-in, let go to look for the wanted one")
                     if self._stream is None:
                         if hot and may_hold and now >= self._retry_at:
                             try:
@@ -458,9 +468,11 @@ class Recorder:
                                 # or this thread would hammer the device four
                                 # times a second for the length of the call.
                                 self._retry_at = time.perf_counter() + 2.0
+                                self.closed_why = "busy in another program"
                         continue
                     if not hot or not may_hold:
-                        self._close()
+                        self._close("not held any longer (hot_ms ran out)" if not hot
+                                    else "handed to a program in yield_to")
 
         self._keeper = threading.Thread(target=loop, daemon=True)
         self._keeper.start()
@@ -469,7 +481,7 @@ class Recorder:
         """Gives the microphone back to other programs right now."""
         with _pa_lock:
             if not self._armed:
-                self._close()
+                self._close("given back on request")
 
     def start(self) -> bool:
         """Begins a take, keeping whatever pre-roll is already in the buffer.
@@ -710,7 +722,7 @@ class Recorder:
             self._hot_until = time.perf_counter() + self.hot_s
             self._ensure_keeper()
         else:
-            self._close()
+            self._close("not held between takes (hot_ms = 0)")
         if not chunks:
             return np.zeros(0, dtype=np.float32)
         audio = np.concatenate(chunks).astype(np.float32)

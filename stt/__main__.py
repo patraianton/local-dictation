@@ -766,6 +766,12 @@ class Dictation:
             # to say so and adopt it: everything from its start is in the
             # buffer, so nothing is lost either way.
             log("a take was already recording — this press joined it")
+        elif self.recorder.pending_preroll_s < 0.05:
+            # Nothing from before the press: the first syllable is at risk. Say
+            # what had the microphone, so the cause can be counted: 7 of the 91
+            # takes of 11.10.2026 came this way, four of them 2-6 minutes after
+            # the previous take, well inside the half hour it is held for.
+            self._log_cold_press()
         self.recording, self.locked = True, False
         self.t_down = time.perf_counter()
         self._take_started = self.t_down
@@ -795,6 +801,17 @@ class Dictation:
         # `recording` is False); give it a new one on the take's own clock.
         threading.Thread(target=self._watchdog, args=(self._take_started,),
                          daemon=True).start()
+
+    def _log_cold_press(self) -> None:
+        """One line on a press that found no sound before it. Never raises."""
+        try:
+            rec = self.recorder
+            ago = time.perf_counter() - rec.closed_at
+            front = (paste_mod.foreground_exe() or "").lower() or "unknown"
+            log(f"no pre-roll on this press: the microphone was let go {ago:.1f} s "
+                f"before ({rec.closed_why}); in front: {front}")
+        except Exception as exc:
+            log(f"no pre-roll on this press ({type(exc).__name__}: {exc})")
 
     def _may_hold_mic(self) -> bool:
         """Whether to keep holding the microphone between takes.
