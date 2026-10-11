@@ -17,6 +17,12 @@ from . import endings
 CYRILLIC_LOWER_RE = re.compile(r"[а-яё]", re.UNICODE)
 
 
+def sentence_start(text: str, pos: int) -> bool:
+    """Nothing but spaces before pos, or the last mark before it ends a sentence."""
+    before = text[:pos].rstrip()
+    return not before or before[-1] in ".!?…\n"
+
+
 def yo_key(word: str) -> str:
     """"ё" and "е" are two spellings of one letter, not two different words."""
     return word.lower().replace("ё", "е")
@@ -28,9 +34,32 @@ class Fixes:
         self._lock = threading.Lock()
         self.pairs: dict[str, tuple[str, int, str]] = {}
         self._regex = None
+        self._stamp = None  # the file as it was when last read or written
         self.load()
 
+    def _on_disk(self):
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def refresh(self) -> bool:
+        """Re-reads the file if it changed on disk since it was last read.
+
+        The file says it is safe to edit by hand and picked up live, and nothing
+        re-read it: a pair written in by hand worked only from the next restart.
+        Worse, the next pair the learner added wrote the file back from memory
+        and erased every hand-written pair since the start — 42 of them were lost
+        that way on 06–07.10.2026.
+        """
+        if self._on_disk() == self._stamp:
+            return False
+        self.load()
+        return True
+
     def load(self) -> None:
+        stamp = self._on_disk()
         pairs: dict[str, tuple[str, int, str]] = {}
         if self.path.exists():
             for line in self.path.read_text(encoding="utf-8").splitlines():
@@ -46,6 +75,7 @@ class Fixes:
                     pairs[src.lower()] = (dst, hits, origin)
         with self._lock:
             self.pairs = pairs
+            self._stamp = stamp
             self._rebuild()
 
     def _rebuild(self) -> None:
@@ -58,6 +88,10 @@ class Fixes:
         self._regex = re.compile(rf"(?<!\w)({body})(?!\w)", re.IGNORECASE | re.UNICODE)
 
     def apply(self, text: str) -> tuple[str, int]:
+        try:
+            self.refresh()
+        except Exception:  # an unreadable file mid-save: use what we have
+            pass
         with self._lock:
             regex, pairs = self._regex, dict(self.pairs)
         if not regex or not text:
@@ -77,11 +111,21 @@ class Fixes:
             # "herdr" and "worktree" are always lowercase, "iPhone" stays as
             # written. The corrector capitalizes them at a sentence start — it
             # is the one that can see where a sentence begins.
-            if said[:1].isupper() and CYRILLIC_LOWER_RE.match(dst):
+            #
+            # A capital in the middle of a sentence says nothing about the
+            # replacement either: the recognizer writes English words with a
+            # capital anywhere ("Royce, Net" for "рой Sonnet") and takes a
+            # mangled Russian word for a name ("отправь Ройсона от агентов" for
+            # "рой Sonnet-агентов", 05.10.2026). So the capital comes from the
+            # position, not from what was heard.
+            if (said[:1].isupper() and CYRILLIC_LOWER_RE.match(dst)
+                    and sentence_start(m.string, m.start())):
                 dst = dst[:1].upper() + dst[1:]
             return dst
 
-        return regex.sub(sub, text), count
+        # Runs on the raw text and again on the corrector's: neither should
+        # keep a capital after a comma on an ordinary word (endings.comma_capital).
+        return endings.comma_capital(regex.sub(sub, text)), count
 
     def add(self, src: str, dst: str, origin: str = "auto") -> bool:
         """Adds a pair. Returns True if the pair is new.
@@ -116,6 +160,8 @@ class Fixes:
             return False
         if endings.touches_verb_form(src, dst) or endings.is_known_verb(src):
             return False
+        # The file is written back whole below: start from what is on disk now.
+        self.refresh()
         with self._lock:
             back = self.pairs.get(dst.lower())
             if back and back[0].lower() == key:
@@ -161,6 +207,7 @@ class Fixes:
             dst, hits, origin = self.pairs[key]
             lines.append(f"{key}\t{dst}\t{hits}\t{origin}")
         self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self._stamp = self._on_disk()
 
     def __len__(self) -> int:
         return len(self.pairs)

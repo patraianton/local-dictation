@@ -25,7 +25,10 @@ state = {
     "loaded": [SMALL],
     "api_v0": True,       # False — старая LM Studio, у неё нет /api/v0
     "chat_calls": [],     # тела запросов на генерацию
+    "answers": "",        # "bare" — отвечает на голую фразу, "always" — на любую
 }
+
+ANSWER = "Конечно! Вот подробный ответ на ваш вопрос со всеми пояснениями. " * 4
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -63,6 +66,11 @@ class Fake(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(n) or b"{}")
         state["chat_calls"].append(body)
         text = body["messages"][-1]["content"]
+        fenced = "<<<" in text
+        if state["answers"] == "always" or (state["answers"] == "bare" and not fenced):
+            text = ANSWER
+        elif fenced:
+            text = text.split("<<<\n", 1)[1].rsplit("\n>>>", 1)[0].replace(" что", ", что")
         self._send(200, {"choices": [{"message": {"content": text}}]})
 
 
@@ -145,6 +153,38 @@ def _():
     got, why = make().loaded_models()
     state["loaded"] = [SMALL]
     return got == [], f"{got} {why}"
+
+
+@case("ответил вместо правки — спросили ещё раз, текст в рамке; правка взята")
+def _():
+    pol = make()
+    pol.check(force=True)
+    state["answers"], state["chat_calls"] = "bare", []
+    text, _sec, note = pol.polish("Объясни мне что там написано")
+    state["answers"] = ""
+    calls = len(state["chat_calls"])
+    return (text == "Объясни мне, что там написано" and note.endswith("asked again")
+            and calls == 2), f"{text!r} {note} | запросов: {calls}"
+
+
+@case("и во второй раз ответил — вставляется сказанное, как раньше")
+def _():
+    pol = make()
+    pol.check(force=True)
+    state["answers"], state["chat_calls"] = "always", []
+    text, _sec, note = pol.polish("Объясни мне что там написано")
+    state["answers"] = ""
+    return (text == "Объясни мне что там написано" and "ran off" in note
+            and len(state["chat_calls"]) == 2), f"{text!r} {note}"
+
+
+@case("обычная правка — второго запроса нет")
+def _():
+    pol = make()
+    pol.check(force=True)
+    state["chat_calls"] = []
+    pol.polish("проверка связи")
+    return len(state["chat_calls"]) == 1, str(len(state["chat_calls"]))
 
 
 @case("старая LM Studio без /api/v0 — работаем по-прежнему")

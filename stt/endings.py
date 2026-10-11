@@ -102,6 +102,18 @@ PAIRS = {
 # If "я" or "мы" ("I"/"we") stands nearby, it really is about the speaker,
 # not an order. Leave it alone.
 SELF = {"я", "мы"}
+
+
+def speaker_in(words) -> bool:
+    """Is "я" or "мы" among these words: the speaker is talking about themselves.
+
+    One test for everyone who has to ask it of a list of words — the candidates
+    for the question to the model, and the lock in polish.py that decides
+    whether the corrector may turn "сделаю" into "сделай".
+    """
+    return any(w.lower() in SELF for w in words)
+
+
 # Split into sentences: "я" only protects the sentence it appears in.
 SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+")
 TOKEN = re.compile(r"([^\W_]+)", re.UNICODE)
@@ -149,7 +161,7 @@ def candidates(text: str) -> list[tuple[str, str, str]]:
     out = []
     for sentence in SENT_SPLIT.split(text or ""):
         words = TOKEN.split(sentence)[1::2]
-        if any(w.lower() in SELF for w in words):
+        if speaker_in(words):
             continue  # said "I" or "we": no need to ask
         for word in words:
             imp = PAIRS.get(word.lower())
@@ -215,6 +227,18 @@ try:
     _MORPH = pymorphy3.MorphAnalyzer()
 except Exception:  # pragma: no cover — на машине без библиотеки
     _MORPH = None
+
+
+@lru_cache(maxsize=4096)
+def yo_known(word: str) -> bool:
+    """Does the dictionary know this word spelled WITH its yo ("проверённых" no,
+    "партнёров" yes). Without the library every yo is trusted, as before."""
+    if _MORPH is None:
+        return True
+    try:
+        return bool(_MORPH.word_is_known(word.lower()))
+    except Exception:
+        return True
 
 
 @lru_cache(maxsize=4096)
@@ -323,6 +347,80 @@ def starts_with_command(sentence: str) -> bool:
         if ask_pos is not None and m.start() > ask_pos:
             break  # question word before any imperative: it is a question
     return False
+
+
+# Imperatives that are only a manner of talking. Before the question word one
+# still makes the sentence an order (starts_with_command above); inside the
+# question they merely introduce it: "Как, смотри, это устроено?".
+DISCOURSE = {
+    "смотри", "слушай", "давай", "давайте", "допустим", "скажем", "хватит",
+    "представь", "представьте",
+}
+
+
+# What may stand right in front of an order that opens its clause: "..., найди",
+# "и посмотри", "а потом сделай".
+# "то" closes "если ..., то сделай": "Как закончишь, если план примут, то
+# исполняй" got the corrector's question mark (09.10.2026).
+_CLAUSE_OPENERS = {"и", "а", "но", "да", "потом", "пожалуйста", "ещё", "еще", "тогда", "то"}
+
+
+def order_follows(text: str) -> bool:
+    """Is there an order inside this stretch of text.
+
+    Used on what stands AFTER the question word, where starts_with_command()
+    deliberately stops looking: "А что за отчёт, открой, проверь цифры" asks
+    nothing, it hands out two tasks, and a question mark at its end makes the
+    agent answer instead of search.
+
+    Stricter than the check before the question word, because here the verb has
+    to open a clause (after a comma, a dash, "и", "а"...). Anywhere else a word
+    the dictionary reads as an imperative is mostly a noun in disguise: replayed
+    on the recognizer's own questions, plain plural nouns of the speaker's trade
+    and a name in the genitive each read as an order.
+    """
+    text = text or ""
+    for m in WORD_RE.finditer(text):
+        word = m.group(0).lower()
+        if word in DISCOURSE or not is_imperative(word):
+            continue
+        # The second half of a hyphenated word ("что-нибудь", "кто-либо"):
+        # the word splitter cuts it off, and "нибудь" alone reads as an order.
+        if m.start() > 0 and text[m.start() - 1] == "-":
+            continue
+        lead = text[: m.start()].rstrip()
+        # The word right at the start is the one next to the question word
+        # ("Куда делись?", "Что нашли?" — past tense, and "делись" is also an
+        # imperative to the dictionary): nothing opens a clause there.
+        if not lead:
+            continue
+        if lead[-1] not in ",;:—–-":
+            previous = WORD_RE.findall(lead)
+            if not previous or previous[-1].lower() not in _CLAUSE_OPENERS:
+                continue
+            # "то" as the tail of "какой-то", "где-то" opens nothing.
+            if lead[-len(previous[-1]) - 1:-len(previous[-1])] == "-":
+                continue
+        return True
+    return False
+
+
+# Words a comparative "чем" ("than") follows. The dictionary knows the comparative
+# forms; the list is what is left when the dictionary is missing.
+_COMPARATIVES = {
+    "больше", "меньше", "лучше", "хуже", "раньше", "позже", "чаще", "реже",
+    "быстрее", "медленнее", "дольше", "проще", "сложнее", "дороже", "дешевле",
+    "сильнее",
+}
+
+
+@lru_cache(maxsize=1024)
+def is_comparative(word: str) -> bool:
+    """Is this a comparative: "больше", "лучше" — what "чем" ("than") follows."""
+    w = word.lower()
+    if w in _COMPARATIVES:
+        return True
+    return _MORPH is not None and any("COMP" in p.tag for p in _MORPH.parse(w))
 
 
 # Conjunctions that start not a separate thought but the tail of the previous
@@ -466,3 +564,51 @@ def apply(text: str) -> tuple[str, list[tuple[str, str]]]:
     # Разделители предложений съедаются split'ом — собираем через пробел,
     # знаки препинания остаются внутри самих предложений.
     return " ".join(out), changed
+
+
+PROPER_TAGS = {"Name", "Surn", "Patr", "Geox", "Orgn", "Trad"}
+# An abbreviation or an initial counts only as the word's first reading:
+# "и", "в", "с" are listed as abbreviations too, and they are conjunctions first.
+FIRST_READING_TAGS = {"Abbr", "Init"}
+# A word followed by a dash, a colon or a bracket is a label in a list, not a
+# word of the sentence: "есть А — база, Б — календарь" lost its "Б" (05.10.2026).
+COMMA_CAPITAL_RE = re.compile(
+    r"(,\s+)([А-ЯЁ][а-яё]*)(?![\w'’-])(?!\s*[—–:)]|\s+-\s)"
+)
+
+
+@lru_cache(maxsize=4096)
+def ordinary_word(word: str) -> bool:
+    """A word the dictionary knows and never as a name, place or brand.
+
+    Unknown words are not ordinary: a term the dictionary has never seen keeps
+    whatever capital it came with."""
+    if _MORPH is None:
+        return False
+    low = word.lower()
+    try:
+        if not _MORPH.word_is_known(low):
+            return False
+        parses = _MORPH.parse(low)
+        if parses and FIRST_READING_TAGS & set(parses[0].tag.grammemes):
+            return False
+        return not any(PROPER_TAGS & set(p.tag.grammemes) for p in parses)
+    except Exception:
+        return False
+
+
+def comma_capital(text: str) -> str:
+    """A capital right after a comma goes back to small, unless it is a name.
+
+    Russian does not capitalize after a comma. The recognizer does when a long
+    take is read in pieces and a piece starts mid-sentence: "…как основной
+    агент, А мог там…", "…в приложении, Прямо каждый час…". The corrector
+    leaves such a capital alone — it came from the recognizer. Names, places
+    and anything the dictionary does not know keep their capital.
+    """
+    if not text or "," not in text:
+        return text
+    return COMMA_CAPITAL_RE.sub(
+        lambda m: m.group(1) + (m.group(2).lower() if ordinary_word(m.group(2)) else m.group(2)),
+        text,
+    )

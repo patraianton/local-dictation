@@ -49,7 +49,9 @@ CASES = [
         "Иди собери контекст, отправляя агентов по outbound репозиторию.",
         "Иди собери контекст, отправляя агентов по Outbound репозиторию — "
         "нам надо собрать хорошее ICP.",
-        "Иди собери контекст, отправляя агентов по Outbound репозиторию.",
+        # "outbound" is a term always written in lowercase, so the corrector's
+        # capital on it mid-sentence does not stay either.
+        "Иди собери контекст, отправляя агентов по outbound репозиторию.",
         "anything the model added on its own is dropped",
     ),
     (
