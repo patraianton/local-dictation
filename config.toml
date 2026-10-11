@@ -16,7 +16,26 @@ fix_hotkey = "shift+f13"
 flip_hotkey = "ctrl+f13"
 # A tap shorter than this = hands-free recording until the next press.
 # Holding the key = records while held.
+# Since 01.10.2026 the press that ends hands-free stops at its RELEASE, however
+# long it is held: a tap nobody noticed followed by a held phrase is one take,
+# not a fragment plus a lost phrase (9 such splits in September). A press while
+# the previous take is still recording its tail continues that take.
 tap_ms = 350
+# A hands-free take nobody speaks in (a tap nobody meant) is cancelled after
+# this many seconds of its own sound. 01.10.2026: one ran 300 s with all other
+# audio at 15%; since 10.08 the journals have 17 takes of 45+ s with at most a
+# dozen words. Replayed on 103 takes of 45+ s: at 90 no real dictation is lost
+# (at 45 one was: its first words came 130 s in). 0 = off.
+handsfree_silent_cancel_s = 90
+# A hands-free take that was spoken in and then stayed quiet this long is ended
+# like a stop: recognized and pasted. Speech AFTER that point is not recorded,
+# so this sits well above the longest pause inside a real dictation in the
+# journals (61 s by the speech detector, 81 s by the level rule). 0 = off.
+handsfree_idle_stop_s = 120
+# What counts as voice for those two rules: rms of a 0.3 s window, 3 of the last
+# 4 windows (a click or a cough does not count). 0.004 = -48 dBFS: median speech
+# window 0.052, a quiet room 0.001. Relies on keep_gain holding the level.
+handsfree_voice_rms = 0.004
 # Safety net: the maximum number of seconds to record if you forget to stop.
 max_seconds = 300
 
@@ -112,7 +131,12 @@ max_step_db = 6.0
 # single quiet frame at the end.
 # It does not always wait the full time: as soon as silence starts, it stops.
 # Release during a pause and the delay is almost nothing.
-tail_ms = 400
+# Raised from 400 on 01.10.2026: of 1855 takes (17-30.09) 24 (1.3%) were cut at
+# the 400 ms limit while the voice was still audible. Silence is now counted in
+# sound actually received (blocks of 85 ms), not in 20 ms polls. Replayed on 479
+# recordings: about 10 ms later when released in a pause, 40-60 ms later when
+# released as the word ends.
+tail_ms = 700
 # How many milliseconds of continuous silence count as the end of a phrase.
 tail_quiet_ms = 120
 
@@ -140,12 +164,38 @@ short_model = "large-v3"
 # Takes up to this many seconds go to that model. Above it, turbo.
 # At three seconds this is about a quarter of all takes and adds 0.35 s to them.
 short_seconds = 3.0
+# Takes longer than this many seconds are read with timestamps. The recognizer
+# reads sound in 30-second windows, and without timestamps whatever it did not
+# finish in one window was skipped. Measured 30.09.2026 over September: of 136
+# takes with more than 30 s of speech, 78 lost words that way (about 1,300 in
+# all), and some came out with "Продолжение следует..." on the end. Costs about
+# 0.2 s on those takes only. 0 = the old way everywhere.
+timestamps_after_s = 25.0
+# With condition_on_previous_text off, faster-whisper gives the hint to the FIRST
+# 30-second window only; every later window of a long take was read without the
+# glossary and the punctuation style. true passes the same hint as hotwords,
+# which goes in front of EVERY window; window one stays token-for-token the same
+# (the hint is ~205 tokens, the limit 223). Measured 01.10.2026 on 139 takes
+# with more than 30 s of speech: 118 differ; twelve blind judges preferred it on
+# 77 against 28 (12 even). A last window that echoes the hint instead of speech
+# is read again the old way (asr.py, _without_echo). Long takes only.
+hint_every_window = true
+# Re-read a take with timestamps when its text is too short for its speech, and
+# keep the new text only if it is clearly fuller. Measured 01.10.2026 on 1,811
+# takes: it would have changed 1 in three weeks, at ~8 ms on every take. Off.
+reread_early_end = false
 device = "cuda"
 compute_type = "float16"
 language = "ru"
 # A wider beam. On turbo it costs a hundredth of a second and makes fewer
 # errors: 17.0% against 17.8% on 377 real takes. Set 1 if you want it faster.
 beam_size = 5
+# Penalty on words the recognizer has already written. 1.15 until 08.10.2026:
+# it dropped words the speaker really repeated, fillers, once a whole clause.
+# Measured on 300 takes of 5 s and more: without it 62 takes came out fuller,
+# 30 shorter; three blind judges preferred it 64 to 17. A reading that loops is
+# retried with 1.15 (asr.py, LOOP_PENALTY). 1.0 = no penalty.
+repetition_penalty = 1.0
 vad = true
 # How many glossary terms to feed the recognizer up front (it chokes above 60).
 prompt_terms = 45
@@ -191,11 +241,17 @@ timeout_s = 4.0
 # rolls back anything extra.
 min_words = 1
 # Who decides the question marks.
-# "heard"     — the recognizer does: the corrector may move a mark between
-#               sentences but never add one that was not heard. Since 20.08.2026,
-#               after it invented 5 wrong marks out of 7 in five days ("а это
-#               где-то внизу закопано?" on a plain statement, and once a mark in
-#               the middle of a sentence, splitting it in two).
+# "heard"     — the recognizer does, with one narrow exception. The corrector may
+#               move a mark between sentences, and may add one the recognizer
+#               did not hear ONLY on a sentence that opens as a real question: a
+#               question word among the first six words, no ", а/но/и" after it,
+#               and not somebody else's question passed on ("он спросил, где…"),
+#               not an order ("…, открой, проверь цифры"), not a statement of
+#               need ("мне надо понять, откуда цифры…"). Since 20.08.2026, after the
+#               corrector invented 5 wrong marks out of 7 in five days. Replayed
+#               01.10.2026 over the 177 such marks in the journals (10.08-01.10):
+#               41 were wrong; the stricter rules take off 24 of them and 2 of 95
+#               correct ones.
 # "corrector" — the old way: it may restore a question the recognizer missed.
 #               Catches 36 questions out of 43 instead of 33, and pays with
 #               marks it made up. ctrl+f13 puts a missing mark back by hand.

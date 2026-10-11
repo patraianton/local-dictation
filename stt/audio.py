@@ -31,6 +31,7 @@ The raw path is exclusive — while dictation holds the microphone no other
 program can record. That is why it is only held for `hot_ms` after a take and
 then let go.
 """
+import collections
 import threading
 import time
 
@@ -196,6 +197,21 @@ class Recorder:
         self.last_preroll_s = 0.0     # of the take just handed over
         self._pending_preroll = 0.0   # of the take being recorded now
         self.xruns = 0                      # blocks Windows admits it dropped
+        # When the driver reported a dropped block, and what it called it. The
+        # running total above cannot say which TAKE was hit, so the take's own
+        # share is counted from these (see stop). The window starts at the
+        # pre-roll, not at the key press: a hole in the half second before the
+        # press is a chewed first syllable all the same.
+        self._xrun_events = collections.deque(maxlen=256)
+        self._take_t0 = 0.0
+        self.last_xruns = 0           # dropped blocks inside the take just handed over
+        self.last_xrun_kinds: list[str] = []
+        # A stop that has been asked for and has not yet handed the audio over
+        # (see begin_stop / resume). Set = the stop was taken back.
+        self._stop_req = None
+        # Where the take proper begins in the buffer, i.e. how many samples of
+        # pre-roll came before the key press (see new_audio).
+        self._take_from = 0
 
     @property
     def device(self):
@@ -207,11 +223,12 @@ class Recorder:
 
     def _callback(self, indata, frames, time_info, status):  # noqa: ARG002
         self._last_block_at = time.perf_counter()
-        if status:
-            self.xruns += 1
         block = indata if indata.ndim == 1 else indata.mean(axis=1)
         block = np.asarray(block, dtype=np.float32).copy()
         with self._lock:
+            if status:
+                self.xruns += 1
+                self._xrun_events.append((self._last_block_at, str(status)))
             self._chunks.append(block)
             self._held += len(block)
             if not self._armed:
@@ -454,11 +471,17 @@ class Recorder:
             if not self._armed:
                 self._close()
 
-    def start(self) -> None:
-        """Begins a take, keeping whatever pre-roll is already in the buffer."""
+    def start(self) -> bool:
+        """Begins a take, keeping whatever pre-roll is already in the buffer.
+
+        True when a take was begun. False when one was already being recorded
+        and nothing changed — until 01.10.2026 that case was silent, and the
+        caller went on to show "recording" over a take that was about to end
+        (a key press during the tail of the previous take, see resume()).
+        """
         with _pa_lock:
             if self._armed:
-                return
+                return False
             if self._stale():
                 # Dead underneath us (see _stale): the pre-roll in it is
                 # silence anyway, so opening afresh loses nothing.
@@ -470,7 +493,10 @@ class Recorder:
                     self._chunks, self._held = [], 0
             with self._lock:
                 self._pending_preroll = self._held / float(self._open_sr or TARGET_SR)
+                self._take_t0 = time.perf_counter() - self._pending_preroll
+                self._take_from = self._held
             self._armed = True
+            return True
 
     def _samples(self) -> int:
         with self._lock:
@@ -493,11 +519,40 @@ class Recorder:
         a = np.concatenate(list(reversed(take)))
         return a[-n:] if n < len(a) else a
 
+    def new_audio(self, mark: int | None = None) -> tuple[np.ndarray, int]:
+        """The sound of the take in progress since `mark`, as 16 kHz mono.
+
+        Returns (audio, new_mark). `mark` is what the previous call returned;
+        None = from the start of the take, i.e. without the pre-roll — sound
+        from before the key press is nobody's speech in this take (see
+        VoiceWatch). Instant and read-only: the snapshot of the chunk list and
+        the count are taken under one lock, so a block that arrives meanwhile
+        is counted exactly once, by the next call. Empty when no take is being
+        recorded or the buffer has been handed over since `mark`.
+        """
+        with self._lock:
+            held, armed, sr = self._held, self._armed, self._open_sr
+            chunks = list(self._chunks)             # references; blocks are never edited
+            start = self._take_from if mark is None else mark
+        if not armed or held <= start or start < 0:
+            # Not recording, nothing new, or the buffer was replaced since the
+            # mark (a mark beyond what is held): start over from what is there.
+            return np.zeros(0, dtype=np.float32), (held if held < start else start)
+        want, got, parts = held - start, 0, []
+        for c in reversed(chunks):
+            parts.append(c)
+            got += len(c)
+            if got >= want:
+                break
+        audio = np.concatenate(parts[::-1])[-want:]
+        return _resample(audio, sr or TARGET_SR, TARGET_SR), held
+
     @staticmethod
     def _rms(a: np.ndarray) -> float:
         return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
 
-    def _wait_tail(self, max_tail_s: float, quiet_ms: int, rel: float) -> None:
+    def _wait_tail(self, max_tail_s: float, quiet_ms: int, rel: float,
+                   request=None) -> None:
         """Keeps recording for a moment after the key is released.
 
         People release the key while still finishing the last word, and that
@@ -506,6 +561,27 @@ class Recorder:
 
         It does not always wait the full time: as soon as silence starts, it
         stops. Release during a pause and the delay is almost nothing.
+
+        "Silence" is counted in SAMPLES THAT HAVE ARRIVED, not in polls. The
+        driver hands over blocks of 4096 samples (85 ms at 48 kHz) and this
+        loop looks every 20 ms, so three polls out of four see nothing new.
+        Until 01.10.2026 those empty polls were counted as quiet: the wanted
+        120 ms of silence was reached 120 ms after the last block no matter
+        what was in it, i.e. one quiet block was enough. Now an empty poll tells
+        nothing, and the tail ends after quiet_ms of audio really received.
+        Replayed over 479 recordings of 28.09-01.10 (blocks of 85 ms, release at
+        a random point of the block clock) the stop comes later than the old
+        rule by about 10 ms when the key goes up in a pause and by 40-60 ms
+        (median) when it goes up as the word ends — two quiet blocks instead
+        of one.
+
+        The longest tail was 400 ms until 01.10.2026 and is 700 now. Measured
+        on 30.09 over 1855 takes of 17-30.09: 24 of them (1.3%) were cut at the
+        limit while the voice was still audible. Only those take longer; a take
+        that ends cleanly stops on silence as before.
+
+        `request` (see begin_stop): if it is set while waiting, the stop has
+        been taken back by resume() and there is nothing left to wait for.
         """
         if max_tail_s <= 0:
             return
@@ -513,41 +589,121 @@ class Recorder:
         base = self._rms(self._last_samples(self._open_sr))
         thr = max(base * rel, 0.004)
         step = 0.02
-        need = quiet_ms / 1000.0
-        quiet_for = 0.0
-        deadline = time.perf_counter() + max_tail_s
+        need = int(max(0, quiet_ms) / 1000.0 * self._open_sr)
+        quiet = 0                   # samples of quiet audio in a row
+        now_t = time.perf_counter()
+        deadline = now_t + max_tail_s
+        last_arrival = now_t
         mark = self._samples()
         while time.perf_counter() < deadline:
-            time.sleep(step)
+            if request is not None:
+                if request.wait(step):
+                    return
+            else:
+                time.sleep(step)
             now = self._samples()
             new = now - mark
+            if new <= 0:
+                # Nothing arrived, which says nothing about the sound. But a
+                # stream that has stopped delivering altogether (the microphone
+                # pulled out) must not hold the take for the whole tail.
+                if time.perf_counter() - last_arrival > 0.5:
+                    return
+                continue
             mark = now
-            if new <= 0 or self._rms(self._last_samples(new)) <= thr:
-                quiet_for += step
+            last_arrival = time.perf_counter()
+            if self._rms(self._last_samples(new)) <= thr:
+                quiet += new
             else:
-                quiet_for = 0.0
-            if quiet_for >= need:
+                quiet = 0
+            if quiet >= need:
                 return
 
+    def begin_stop(self):
+        """Registers that this take is about to be stopped. Instant, never waits.
+
+        Returns the request, or None when no take is being recorded. The caller
+        hands it to stop() — which may be running on another thread a moment
+        later — so that a key press arriving in between can already take the
+        stop back with resume(). Without it the press would fall into the gap
+        between "the key was released" and "the thread that stops has started".
+        """
+        with self._lock:
+            if self._stream is None or not self._armed:
+                return None
+            req = threading.Event()
+            self._stop_req = req
+            return req
+
+    def resume(self) -> bool:
+        """Takes back a stop that has been asked for and has not yet finished.
+
+        True: the take goes on exactly as if the key had never been released —
+        same buffer, same pre-roll, the tail that was already recorded stays in
+        — and the pending stop() will return None. False: there is nothing to
+        take back (no stop is pending, or it has already handed the audio over;
+        then the caller starts a new take instead).
+
+        Why. After the release, stop() keeps the take armed for up to the whole
+        tail while it records it. A key press in that window used to reach
+        start(), which saw "armed" and quietly returned; the caller showed
+        "recording", and at the next release stop() gave back nothing: the
+        whole phrase vanished without a trace. Measured over 10.08-30.09.2026,
+        27 takes began within 0.18 s of the end of the previous one, 17 of them
+        in September after takes that were cut while still audible: those are
+        the presses that land on this window.
+
+        The decision is one step under the lock that stop() also takes to hand
+        the audio over, so exactly one of the two wins.
+        """
+        with self._lock:
+            req = self._stop_req
+            if req is None or req.is_set() or not self._armed:
+                return False
+            req.set()
+            self._stop_req = None
+            return True
+
     def stop(self, tail_s: float = 0.0, quiet_ms: int = 120,
-             quiet_rel: float = 0.12) -> np.ndarray:
+             quiet_rel: float = 0.12, request=None):
         """Stops the take and returns 16 kHz mono audio.
 
         tail_s — how long to keep recording after the stop command, at most.
+        request — from begin_stop(), when the caller registered the stop ahead
+        of calling this.
+
+        Returns None, and leaves the take recording, when resume() took the
+        stop back; the caller must not process anything then.
         """
-        if self._stream is None or not self._armed:
+        req = request if request is not None else self.begin_stop()
+        if req is not None and req.is_set():
+            return None                 # taken back before we even started
+        if req is None or self._stream is None or not self._armed:
             self._armed = False
             self.last_preroll_s = 0.0
+            self.last_xruns = 0
+            self.last_xrun_kinds = []
             return np.zeros(0, dtype=np.float32)
         try:
-            self._wait_tail(tail_s, quiet_ms, quiet_rel)
+            self._wait_tail(tail_s, quiet_ms, quiet_rel, req)
         except Exception:
             pass
         with self._lock:
+            # The one decision. resume() sets the request under this same lock,
+            # so either it is already set here (the take stays armed, every
+            # chunk where it was), or it can no longer be set (the audio is
+            # handed over below, and resume() answers False).
+            if req.is_set():
+                return None
+            if self._stop_req is req:
+                self._stop_req = None
             chunks = self._chunks
             self._chunks, self._held = [], 0
+            self._armed = False
+            hits = [kind for t, kind in self._xrun_events if t >= self._take_t0]
+        self.last_xruns = len(hits)
+        self.last_xrun_kinds = sorted(set(hits))
         self.last_preroll_s = self._pending_preroll
-        self._armed = False
         if self.hot_s > 0:
             # Hold the microphone a little longer: the next phrase usually
             # follows within seconds, and then its beginning is not lost.
@@ -583,9 +739,180 @@ def loudness(audio: np.ndarray) -> tuple[float, float]:
     return float(np.abs(audio).max()), float(np.sqrt(np.mean(audio**2)))
 
 
+# A take whose loudest sample stays under this is pulled up by normalize().
+BOOST_BELOW = 0.25
+
+
 def normalize(audio: np.ndarray) -> np.ndarray:
     """Quiet takes are pulled up; loud ones are left alone."""
     peak, _ = loudness(audio)
-    if 0.0 < peak < 0.25:
+    if 0.0 < peak < BOOST_BELOW:
         return (audio * (0.5 / peak)).astype(np.float32)
     return audio
+
+
+# Voice in a hands-free take (see VoiceWatch): a 0.3 s window is voiced at an rms
+# of 0.004 or more (-48 dBFS), and voice is 3 voiced windows out of the last 4.
+# Measured 01.10.2026 on the 6,425 recordings of 24.08-01.10 (15.4 hours, the
+# raw microphone at a held gain), against the recognizer's own speech detector
+# (Silero VAD on the CPU, no padding) as the truth:
+#   * the median window of speech reads 0.052, the median window of an idle take
+#     0.001 (0.0006-0.0024 take by take);
+#   * 98.4% of the windows that are speech reach 0.004; 11.8% of the windows
+#     that are not speech do too (breaths and tails beside words, room noise);
+#   * the first speech of a take was found 0.74 s after it began (median; p99
+#     1.2 s, worst 1.7 s) in all but 4 of 6,079 takes, all four shorter than
+#     2 s; 99.9-100% of the speech stretches over 1 s are found, 94.8% of those
+#     of 0.6-1 s (a lone "да");
+#   * on idle audio (the 17 near-empty long takes, farther than 1 s from any
+#     speech) 6.2% of the windows reach 0.004, and voice is declared about 61
+#     times an hour (counting stretches more than 3 s apart). That only delays
+#     the 60 s rule; it can never cut anybody off.
+# The level is the one number that matters, and it was chosen so that a wrong
+# answer costs time and never speech: 0.012 (the median speech window over four)
+# would have missed 8 of the 13 quietest dictations (take medians 0.004-0.011,
+# among them two long ones of 233 and 218 words) and cancelled them.
+# Three of four, and not one, is what keeps a click, a thump or a cough (one or
+# two windows) from counting: the burst that opened the take of 01.10.2026 is
+# a single loud window. One measure that did not help: the median of the three
+# 100 ms parts of a window instead of its rms (less speech found, no fewer
+# false stretches on idle audio).
+VOICE_WINDOW_S = 0.3
+VOICE_RMS = 0.004
+VOICE_NEED = 3
+VOICE_SPAN = 4
+
+# How long a hands-free take may have nobody in it before it is cancelled, and
+# how long it may stay quiet after speech before it is ended. 90 and 60 since
+# 01.10.2026 (the first draft had 45 for the cancel). Replayed on the 103 takes
+# of 45+ s in the journals (10.08-01.10, 86 of them real dictations):
+#   cancel 45 s: one real dictation lost, the 158-word take of 17.09 that was
+#                begun by a tap and spoken 130 s later (70 s of speech);
+#   cancel 90 s: none lost, and 162 s fewer given back out of the 2,335 s that
+#                the 17 near-empty takes ran (972 s against 1,134 s).
+# The 90 is no guarantee, only the best of the table: that same take is saved
+# at 90 s by luck (a noise at 69.9 s counted as voice), and nothing records
+# after a cancel, so speech that begins later goes to an idle microphone. That
+# is why a cancel stays on the screen for a minute (CANCEL_NOTICE_S in
+# __main__.py) and is not a quiet 2 s flash. The stop is left at 60: it costs
+# at most a few seconds of speech (09-22: a 61 s pause inside a 50-word take,
+# 2.5 s said after the stop; 90 would give back 418 s less) and it is
+# announced the same way.
+SILENT_CANCEL_S = 90.0
+IDLE_STOP_S = 120.0
+
+
+class VoiceWatch:
+    """Notices a hands-free take that has nobody speaking in it. No model.
+
+    Why. A tap on the dictation key (or on the mouse side button mapped to it)
+    that nobody meant turns hands-free on, and hands-free ends only at the next
+    press or at max_seconds. On 01.10.2026 such a take ran 300 s with nobody
+    speaking: other audio sat at 15% and the microphone was held for five
+    minutes, and the recognizer answered with a stock subtitle line. The
+    journals since 10.08 hold 17 takes of 45+ s with at most a dozen words in
+    them (2,335 s of ducking and microphone between them); some caught other
+    people's talk from a call for minutes.
+
+    Two rules, both on the take's own audio clock (seconds of sound received,
+    not the wall clock, so a stalled stream or a sleeping machine cannot fire
+    them):
+      * no voice at all within `silent_cancel_s` of the start -> "cancel";
+      * voice was heard, then `idle_stop_s` without any -> "stop" (an ordinary
+        stop: the take is recognized and pasted, nothing is lost).
+    0 switches a rule off.
+
+    Replayed over the 103 takes of 45+ s in the journals at 90 s / 60 s (the
+    defaults, see SILENT_CANCEL_S): 9 of the 17 near-empty ones are cut (2
+    cancelled, 7 stopped), which gives back 972 s of the 2,335 (42%); of the 86
+    real dictations none is cancelled and two are stopped, leaving 0 s and 2.5
+    s of speech behind. At 45 s the cancel gave back 1,134 s but cut a
+    158-word dictation whose speech began 130 s in. The longest silence inside
+    a real dictation was 61 s by the speech detector (the next one 53 s): 60 s
+    is at the edge of what people do, not far inside it.
+
+    What a cancel does NOT do: a cancelled take keeps its sound (see
+    write_dropped), and that sound only shows what the silent stretch held, for
+    example speech too quiet for VOICE_RMS. Nothing records after the cancel,
+    so speech that begins later is not captured anywhere; the only way to catch
+    it is for the person to see that the take is over (the caller keeps a
+    notice on the screen and the other audio comes back to full volume). The
+    same goes for a stop: what is said after it goes to an idle microphone.
+
+    What counts as voice is cheap on purpose, no model: see VOICE_RMS. It cannot
+    tell a voice from anything else that is as loud and as long — someone else's
+    talk, music, typing at a steady clip — and then the rules simply do not
+    fire and the take ends as it did before, at the next press or at
+    max_seconds.
+
+    Feed it the audio of the take with feed(), or let poll() pull it from the
+    Recorder. Thread-safe: poll() may be called by more than one watchdog.
+    """
+
+    def __init__(self, silent_cancel_s: float = SILENT_CANCEL_S,
+                 idle_stop_s: float = IDLE_STOP_S,
+                 rms: float = VOICE_RMS, need: int = VOICE_NEED,
+                 span: int = VOICE_SPAN, sr: int = TARGET_SR,
+                 window_s: float = VOICE_WINDOW_S):
+        self.silent_cancel_s = max(0.0, float(silent_cancel_s))
+        self.idle_stop_s = max(0.0, float(idle_stop_s))
+        self.rms = float(rms)
+        self.span = max(1, int(span))
+        self.need = max(1, min(int(need), self.span))
+        self.sr = int(sr)
+        self._win = max(1, int(round(window_s * self.sr)))
+        self._rest = np.zeros(0, dtype=np.float32)   # less than one window, not yet counted
+        self._seen = 0                               # samples fed so far
+        self._recent = collections.deque(maxlen=self.span)   # last windows: voiced or not
+        self._windows = 0
+        self.heard = False
+        self.last_voice_s = 0.0      # end of the last window that made voice
+        self._mark = None            # Recorder.new_audio cursor
+        self._lock = threading.Lock()
+
+    @property
+    def enabled(self) -> bool:
+        return self.silent_cancel_s > 0 or self.idle_stop_s > 0
+
+    @property
+    def elapsed_s(self) -> float:
+        """Seconds of the take's sound seen so far (pre-roll not counted)."""
+        return self._seen / float(self.sr)
+
+    def feed(self, audio: np.ndarray) -> None:
+        """Adds 16 kHz mono sound of the take, in any chunking."""
+        if audio is None or not len(audio):
+            return
+        a = np.asarray(audio, dtype=np.float32)
+        self._seen += len(a)
+        if len(self._rest):
+            a = np.concatenate([self._rest, a])
+        n = len(a) // self._win
+        if n:
+            w = a[: n * self._win].reshape(n, self._win)
+            # mean square per window; compared as a square, no sqrt needed
+            ms = np.einsum("ij,ij->i", w, w) / self._win
+            for v in (ms >= self.rms * self.rms).tolist():
+                self._windows += 1
+                self._recent.append(v)
+                if v and sum(self._recent) >= self.need:
+                    self.heard = True
+                    self.last_voice_s = self._windows * self._win / float(self.sr)
+        self._rest = a[n * self._win:]
+
+    def verdict(self) -> str | None:
+        """"cancel", "stop", or None (carry on)."""
+        t = self.elapsed_s
+        if not self.heard:
+            if 0 < self.silent_cancel_s <= t:
+                return "cancel"
+        elif 0 < self.idle_stop_s <= t - self.last_voice_s:
+            return "stop"
+        return None
+
+    def poll(self, recorder: "Recorder") -> str | None:
+        """Pulls what the recorder has taken since the last call; the verdict."""
+        with self._lock:
+            audio, self._mark = recorder.new_audio(self._mark)
+            self.feed(audio)
+            return self.verdict()
