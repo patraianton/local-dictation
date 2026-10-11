@@ -163,7 +163,12 @@ model = "large-v3-turbo"
 short_model = "large-v3"
 # Takes up to this many seconds go to that model. Above it, turbo.
 # At three seconds this is about a quarter of all takes and adds 0.35 s to them.
-short_seconds = 3.0
+# Was 3.0 until 11.10.2026. Measured then on 160 random takes of 3-20 s from
+# the ten days before, both models read with the live settings: they wrote
+# different words in 86; three blind judges (majority) preferred large-v3 in 31
+# and turbo in 11 (44 even). By length: 3-6 s 12 to 1, 6-12 s 11 to 9, 12-20 s
+# 8 to 1. Past 20 s it was not measured and timestamps take over at 25 s.
+short_seconds = 20.0
 # Takes longer than this many seconds are read with timestamps. The recognizer
 # reads sound in 30-second windows, and without timestamps whatever it did not
 # finish in one window was skipped. Measured 30.09.2026 over September: of 136
