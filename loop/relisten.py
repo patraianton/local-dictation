@@ -5,9 +5,9 @@ really said that way or the live read got them wrong.
     python loop/relisten.py recordings/<day>/<take>.wav
         plain read by both models (large-v3 and large-v3-turbo), no hint
     python loop/relisten.py recordings/<day>/<take>.wav --variants [model]
-        the live settings, then the same with one setting off at a time
-        (hint, repetition penalty, speech filter, timestamps), to find the
-        setting that changes the text
+        the live settings, then the same with one setting off or flipped at a
+        time (hint, penalty on repeated words, speech filter, timestamps), to
+        find the setting that changes the text
 
 The CPU read is not the live read: the live one runs on the video card in
 float16, so the two can differ by a word on their own. A word that every read
@@ -23,7 +23,7 @@ APP = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP))
 from faster_whisper import WhisperModel  # noqa: E402
 from stt import config as cfg_mod, termstats  # noqa: E402
-from stt.asr import Asr, build_prompt  # noqa: E402
+from stt.asr import LOOP_PENALTY, Asr, build_prompt  # noqa: E402
 from stt.fixes import Fixes  # noqa: E402
 
 
@@ -49,8 +49,9 @@ def variants(audio: np.ndarray, cfg: dict, name: str) -> None:
     m = WhisperModel(name, device="cpu", compute_type="int8")
     asr = Asr(cfg, terms)
     long_take = len(audio) / 16000 > asr.timestamps_after_s
+    live_rep = asr.repetition_penalty
 
-    def run(label, prompt=hint, rep=1.15, vad=True, ts=long_take, every=long_take):
+    def run(label, prompt=hint, rep=live_rep, vad=True, ts=long_take, every=long_take):
         segs, _ = m.transcribe(
             audio, language=asr.language, beam_size=asr.beam_size,
             temperature=[0.0, 0.2, 0.4, 0.6], compression_ratio_threshold=2.4,
@@ -63,7 +64,7 @@ def variants(audio: np.ndarray, cfg: dict, name: str) -> None:
 
     run("live")
     run("no hint", prompt=None)
-    run("no rep. penalty", rep=1.0)
+    run("penalty flip", rep=LOOP_PENALTY if live_rep < LOOP_PENALTY else 1.0)
     run("no vad", vad=False)
     run("timestamps flip", ts=not long_take, every=False)
 
