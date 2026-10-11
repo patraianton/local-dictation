@@ -9,9 +9,11 @@ Usage:
     run.ps1 bench FILE   — how long recognition takes
 """
 import io
+import json
 import sys
 import threading
 import time
+import wave
 from datetime import datetime
 from pathlib import Path
 
@@ -37,12 +39,129 @@ from .polish import Polisher  # noqa: E402
 MIN_SECONDS = 0.25
 SILENCE_RMS = 0.0015
 
+# A "down" event while the key is already down is the keyboard repeating itself
+# (Windows: one event after 0.25-1 s of holding, then one every 33-500 ms).
+# After a gap longer than this it cannot be the same hold any more: the release
+# must have been missed, so the press is treated as a new one (see on_down).
+KEY_REPEAT_GAP_S = 1.5
+
+# How long the screen keeps saying that a hands-free take was ended by itself
+# (see Dictation._hands_free_idle). Nothing records after a cancel, so speech
+# that begins late goes to an idle microphone and the notice is the only thing
+# that can tell the person; the 2 s flash it first had is a glance away. The
+# latest start of a real dictation in the journals (10.08-01.10) was 130 s into
+# the take, 3 of 86 long ones began after 10 s: a minute is longer than anyone
+# takes to begin and short enough not to leave a grey dot on the screen. The
+# next press of the key replaces it at once.
+CANCEL_NOTICE_S = 60.0
+# The same for the stop after a pause: the text has been pasted, and the notice
+# says that what is said next is not being recorded. Short, because the paste
+# itself tells the person something happened.
+STOP_NOTICE_S = 4.0
+
+# How long a take waits for the one before it to finish being recognized and
+# pasted, before it gives up and is kept as a dropped take. Recognition of a
+# five-minute take plus the corrector is about 10 s; this is for a hung GPU.
+BUSY_WAIT_S = 120.0
+# Waiting longer than this is worth a line in the log.
+BUSY_LOG_S = 1.0
+
+# A phrase that ends on one of these was cut off by the speaker, not finished.
+# A question mark glued on after them is wrong whatever the voice sounded like.
+CUT_OFF_ENDINGS = ("...", "…", ",", ";", ":", "—", "–", "-")
+
 
 def log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
+def write_dropped(log_dir: Path, rec_dir: Path, reason: str, audio: np.ndarray, *,
+                  secs: float, peak: float, rms: float, preroll_s: float,
+                  raw: str = "", xruns: int = 0, error: str = "",
+                  ms_asr: int | None = None, keep_audio: bool = True,
+                  now: datetime | None = None) -> dict | None:
+    """Leaves a trace of a take that was thrown away. Never raises.
+
+    Until 01.10.2026 a take that was dropped ("too short", silence, nothing
+    recognized, the recognizer's stock subtitle line) left no row and no sound,
+    only a hint on the screen for a second: nobody could say how often it
+    happened or whether any of them held real speech. The audit of 30.09 could
+    only count the silence ones, six in a month, from a log that is wiped on
+    every restart. A hands-free take cancelled because nobody spoke in it
+    ("handsfree_silent", see Dictation._hands_free_idle) is kept the same way:
+    the sound is the only way to find out that a cancel misjudged the stretch
+    it listened to (speech too quiet for the rule). It says nothing about
+    speech that begins after the cancel: nothing records then.
+
+    The row goes to logs/dropped/YYYY-MM-DD.jsonl, NOT next to the real ones:
+    store.py and termstats.py read logs/*.jsonl and would count these as takes.
+    The sound goes to recordings/YYYY-MM-DD/dropped/, apart from the audio+text
+    pairs of real takes for the same reason (a wav with no .txt would break
+    anything that pairs them). Returns the row, or None if it could not be
+    written; the log line says why.
+    """
+    try:
+        now = now or datetime.now()
+        day = f"{now:%Y-%m-%d}"
+        stamp = now.strftime("%H%M%S-%f")[:-3]
+        row: dict = {
+            "id": f"{day}_{stamp}",
+            "time": now.isoformat(timespec="seconds"),
+            "reason": reason,
+            "seconds": round(float(secs), 2),
+            "peak": round(float(peak), 4),
+            "rms": round(float(rms), 5),
+            "preroll_s": round(float(preroll_s), 3),
+        }
+        if raw:
+            row["raw"] = raw
+        if ms_asr is not None:
+            row["ms_asr"] = int(ms_asr)
+        if xruns:
+            row["xruns"] = int(xruns)
+        if error:
+            row["error"] = error[:300]
+        wav_path = None
+        if keep_audio and audio is not None and audio.size:
+            folder = Path(rec_dir) / day / "dropped"
+            folder.mkdir(parents=True, exist_ok=True)
+            # Two drops inside one millisecond (a burst of failures) must not
+            # write over each other's sound.
+            stem, n = stamp, 1
+            while (folder / f"{stem}.wav").exists():
+                n += 1
+                stem = f"{stamp}-{n}"
+            row["id"] = f"{day}_{stem}"
+            wav_path = folder / f"{stem}.wav"
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+            with wave.open(str(wav_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(audio_mod.TARGET_SR)
+                wf.writeframes(pcm.tobytes())
+        row["wav"] = str(wav_path) if wav_path else None
+        folder = Path(log_dir) / "dropped"
+        folder.mkdir(parents=True, exist_ok=True)
+        with open(folder / f"{day}.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return row
+    except Exception as exc:
+        try:
+            log(f"could not keep a trace of a dropped take ({reason}): "
+                f"{type(exc).__name__}: {exc}")
+        except Exception:
+            pass
+        return None
+
+
 class Dictation:
+    # Hands-free rules (see audio.VoiceWatch). Class-level so that a Dictation
+    # built without __init__ (the key-flow tests) has them too; __init__
+    # replaces them from [hotkey] in config.toml.
+    handsfree_silent_cancel_s = audio_mod.SILENT_CANCEL_S
+    handsfree_idle_stop_s = audio_mod.IDLE_STOP_S
+    handsfree_voice_rms = audio_mod.VOICE_RMS
+
     def __init__(self):
         cfg_mod.ensure_dirs()
         self.cfg = cfg_mod.load()
@@ -68,8 +187,21 @@ class Dictation:
         self.flip_hotkey = hk.get("flip_hotkey", "ctrl+f13")
         self.tap_ms = int(hk.get("tap_ms", 350))
         self.max_seconds = int(hk.get("max_seconds", 300))
+        # A hands-free take that nobody speaks in (a tap nobody meant) is
+        # cancelled after this many seconds of its own sound; one that went
+        # quiet after real speech is ended like a stop after this many. 0 = off.
+        # See audio.VoiceWatch for the measurements behind the defaults.
+        self.handsfree_silent_cancel_s = float(
+            hk.get("handsfree_silent_cancel_s", self.handsfree_silent_cancel_s))
+        self.handsfree_idle_stop_s = float(
+            hk.get("handsfree_idle_stop_s", self.handsfree_idle_stop_s))
+        self.handsfree_voice_rms = float(
+            hk.get("handsfree_voice_rms", self.handsfree_voice_rms))
         mic_cfg = self.cfg.get("mic", {})
-        self.tail_s = float(mic_cfg.get("tail_ms", 400)) / 1000.0
+        # 700 since 01.10.2026 (was 400): 24 of 1855 takes (1.3%) were still
+        # audible when the old limit cut them off. The early stop on silence is
+        # kept, so a take that ended cleanly costs the same as before.
+        self.tail_s = float(mic_cfg.get("tail_ms", 700)) / 1000.0
         self.tail_quiet_ms = int(mic_cfg.get("tail_quiet_ms", 120))
 
         self.mic_path = str(mic_cfg.get("path", "raw"))
@@ -129,13 +261,49 @@ class Dictation:
         self.recorder.should_hold = self._may_hold_mic
 
         self.asr = None
-        self.recording = False
-        self.locked = False
-        self.t_down = 0.0
-        self.busy = threading.Lock()
+        self._init_flow()
         self.last: dict = {}
         self.mouse_hook = None
         self.toggle_hook = None
+
+    def _init_flow(self) -> None:
+        """The state of the key and of the take in progress.
+
+        One place, so that a test can build a Dictation without the rest of it
+        (microphone, models, hooks) and drive the key handlers alone.
+        """
+        # A take is in progress from the key's point of view: from the press
+        # until the release that stops it. During the tail after that release
+        # it is False, although the recorder is still recording.
+        self.recording = False
+        self.locked = False                # hands-free: no need to hold the key
+        self.t_down = 0.0                  # when the take began
+        # The physical state of the key, kept apart from the take: a held key
+        # sends "down" over and over, and none of those may start or stop
+        # anything (see on_down).
+        self.key_down = False
+        self._down_at = 0.0                # when the last "down" event arrived
+        # A short press makes a new take hands-free. A take that was resumed
+        # (a press during the tail) must not: its next release ends it.
+        self._tap_ok = True
+        # Hands-free take, and the press that is to stop it is down right now:
+        # the stop happens at its release, not at the press (see _press).
+        self._stop_on_up = False
+        self._take_started = 0.0
+        # Listens to the sound of the take in progress for the hands-free rules
+        # (see _hands_free_idle). One per take, kept across a resume.
+        self._voice = None
+        # The key handlers run on the keyboard thread, the mouse button on its
+        # own, the stop on a third; every change of the state above goes
+        # through this lock. Nothing under it ever waits for the tail.
+        self._key_lock = threading.RLock()
+        self.busy = threading.Lock()
+        # Takes are processed in the order they were spoken. A plain lock does
+        # not promise that to several waiters, so each take draws a number.
+        self._turn_cv = threading.Condition()
+        self._turn_next = 0
+        self._turn_serving = 0
+        self._turn_skipped: set[int] = set()
 
     # ---------- startup ----------
     def boot(self) -> None:
@@ -364,17 +532,76 @@ class Dictation:
 
     # ---------- the key ----------
     def on_down(self, _event=None) -> None:
-        if self.recording:
-            if self.locked:
-                self.stop_and_process()
-            return  # key auto-repeat
-        self.start()
+        """The key went down. Only the FIRST down of a hold means anything.
+
+        A held key repeats "down" until it is released. The old code told the
+        repeats from a real press by looking at whether a take was running,
+        which fails exactly when it matters: once a take has just been stopped
+        by this very press, the next repeat found nothing running and started
+        a new one (one way September's 9 phrases cut in two came about: the
+        second half became a take of its own, and when that was released
+        within tap_ms it even turned hands-free by itself). Now the state of
+        the key is tracked on its own, and a repeat is ignored in every state.
+        """
+        with self._key_lock:
+            now = time.perf_counter()
+            if self.key_down:
+                if now - self._down_at < KEY_REPEAT_GAP_S:
+                    self._down_at = now
+                    return              # the keyboard repeating itself
+                # The key "is down" yet no repeat has come for longer than the
+                # keyboard ever waits: the release was lost (a hook that missed
+                # it, a mouse button remapped by its driver). Without this the
+                # key would stay "held" for good and every later press would be
+                # ignored until a restart. Act as if the release had come.
+                log("a key release was missed — taking this press as a new one")
+                self.key_down = False
+                self._release(now)
+            self.key_down = True
+            self._down_at = now
+            self._press()
 
     def on_up(self, _event=None) -> None:
-        if not self.recording or self.locked:
+        with self._key_lock:
+            if not self.key_down:
+                return                  # a release with no press (app started with the key held)
+            self.key_down = False
+            self._release(time.perf_counter())
+
+    def _press(self) -> None:
+        """A fresh press of the key (not a repeat)."""
+        if self.recording:
+            if self.locked:
+                # Hands-free, and this press is meant to stop it — or is the
+                # start of a phrase by someone who did not notice hands-free
+                # and is now holding the key to speak (9 cases in September:
+                # the old code stopped at the press, the first words went into
+                # the old take as a fragment of one to three words and the rest
+                # into another take or nowhere). So nothing happens at the
+                # press: the stop is at its release, however long it was held.
+                # A deliberate tap-to-stop costs the 100-300 ms of the tap; a
+                # held key gives one whole take, and the recognizer's own
+                # silence filter drops the quiet stretch in the middle.
+                self._stop_on_up = True
             return
-        held_ms = (time.perf_counter() - self.t_down) * 1000
-        if held_ms < self.tap_ms:
+        if self.recorder.resume():
+            # The previous take is still recording its tail: this press
+            # continues it (see Recorder.resume).
+            self._resume_take(lock=False)
+            return
+        self.start()
+
+    def _release(self, now: float) -> None:
+        """The key came up (or is taken to have)."""
+        if not self.recording:
+            return
+        if self.locked:
+            if self._stop_on_up:
+                self._stop_on_up = False
+                self.stop_and_process()
+            return
+        held_ms = (now - self.t_down) * 1000
+        if held_ms < self.tap_ms and self._tap_ok:
             self.locked = True
             self.hud.set("lock", "hands-free")
         else:
@@ -387,20 +614,50 @@ class Dictation:
         own button — a mouse button is pressed and released in a few
         milliseconds, so "hold to speak" is not a thing there.
         """
-        if self.recording:
-            self.stop_and_process()
-            return
-        self.start()
-        self.locked = True
-        self.hud.set("lock", "hands-free")
+        with self._key_lock:
+            if self.recording:
+                self.stop_and_process()
+                return
+            if self.recorder.resume():
+                # Pressed while the previous take records its tail: it goes on,
+                # and stays on until this button is pressed again.
+                self._resume_take(lock=True)
+                return
+            self.start()
+            if self.recording:          # the microphone may have refused
+                self.locked = True
+                self.hud.set("lock", "hands-free")
 
     def on_esc(self, _event=None) -> None:
-        if self.recording:
-            self.recording = self.locked = False
-            self.recorder.stop()
+        with self._key_lock:
+            if self.recording:
+                self._abort_take()
+                self.hud.set("warn", "cancelled", hide_after=1.0)
+                log("recording cancelled")
+
+    def _abort_take(self) -> np.ndarray:
+        """Ends the take in progress without recognizing it; returns its sound.
+
+        Esc and the hands-free silence rule both end a take this way: stop at
+        once (no tail), give the other audio back. Call with _key_lock held,
+        while `recording` is true.
+
+        Never raises, and the other audio always comes back: if the recorder
+        fails to stop (a resample or memory error), the take is lost and an
+        empty sound is returned, but the volume of everything else must not
+        stay at 15% — that is the very thing the silence rule exists to end.
+        """
+        self.recording = self.locked = False
+        self._stop_on_up = False
+        data = np.zeros(0, dtype=np.float32)
+        try:
+            data = self.recorder.stop()
+        except Exception as exc:
+            log(f"the recorder failed to stop ({type(exc).__name__}: {exc}) — "
+                f"the take is lost, other audio is given back")
+        finally:
             self.ducker.restore()
-            self.hud.set("warn", "cancelled", hide_after=1.0)
-            log("recording cancelled")
+        return data
 
     def on_repaste(self) -> None:
         """Paste the last take into the window under the mouse.
@@ -496,17 +753,48 @@ class Dictation:
         if time.perf_counter() < self.mic_cooldown:
             return
         try:
-            self.recorder.start()
+            began = self.recorder.start()
         except Exception as exc:
             self.mic_cooldown = time.perf_counter() + 3.0
             self.hud.set("err", "mic did not open", hide_after=3.0)
             log(f"the microphone did not open: {exc}")
             return
+        if not began:
+            # A take is already being recorded although none was asked for.
+            # Showing "recording" over a take that is not ours is how a whole
+            # phrase used to vanish (see Recorder.resume); the honest thing is
+            # to say so and adopt it: everything from its start is in the
+            # buffer, so nothing is lost either way.
+            log("a take was already recording — this press joined it")
         self.recording, self.locked = True, False
         self.t_down = time.perf_counter()
+        self._take_started = self.t_down
+        self._tap_ok = True
+        self._stop_on_up = False
+        self._voice = self._new_voice()
         self.ducker.duck()      # turn other audio down while you speak
         self.hud.set("rec", "")
-        threading.Thread(target=self._watchdog, daemon=True).start()
+        threading.Thread(target=self._watchdog, args=(self._take_started,),
+                         daemon=True).start()
+
+    def _resume_take(self, lock: bool) -> None:
+        """A press arrived while the previous take was still recording its tail.
+
+        The recorder has already taken the stop back, so the take simply goes
+        on: no new take, no second pre-roll, and the sound of the tail stays
+        in. The other audio is still ducked (the stop never reached restore()).
+        The next release of the key ends it — never "hands-free": a short press
+        here is someone finishing a sentence, not asking for a mode.
+        """
+        self.recording, self.locked = True, lock
+        self._tap_ok = False
+        self._stop_on_up = False
+        self.hud.set("lock" if lock else "rec", "hands-free" if lock else "")
+        log("pressed again while the take was ending — it goes on as one take")
+        # The watchdog of this take has probably gone (it stops looking while
+        # `recording` is False); give it a new one on the take's own clock.
+        threading.Thread(target=self._watchdog, args=(self._take_started,),
+                         daemon=True).start()
 
     def _may_hold_mic(self) -> bool:
         """Whether to keep holding the microphone between takes.
@@ -600,32 +888,187 @@ class Dictation:
             return False
         return True
 
-    def _watchdog(self) -> None:
-        started = time.perf_counter()
-        while self.recording:
+    def _watchdog(self, started: float) -> None:
+        # `started` is when the TAKE began, so a take that was resumed keeps its
+        # own clock, and a watchdog left over from an earlier take cannot cut
+        # this one short (it has a different start time and ends when `locked`
+        # and `recording` no longer describe its take).
+        while self.recording and self._take_started == started:
             if time.perf_counter() - started > self.max_seconds:
                 log("the maximum-length safety net fired")
                 self.stop_and_process()
                 return
+            if self._hands_free_idle(started):
+                return
             time.sleep(0.25)
 
-    def stop_and_process(self) -> None:
-        if not self.recording:
-            return
-        self.recording = self.locked = False
-        self.hud.set("think", "thinking")
+    def _new_voice(self):
+        """The listener for a take that is just beginning, or None if both rules are off."""
+        watch = audio_mod.VoiceWatch(
+            silent_cancel_s=self.handsfree_silent_cancel_s,
+            idle_stop_s=self.handsfree_idle_stop_s,
+            rms=self.handsfree_voice_rms,
+        )
+        return watch if watch.enabled else None
+
+    def _key_is_held(self) -> bool:
+        """Whether the key is really down: a held key keeps repeating.
+
+        `key_down` alone is not enough. When the release is lost (a hook that
+        missed it, a mouse button remapped by its driver) it stays True until
+        the next press, and on_down already knows that a key that has not
+        repeated for KEY_REPEAT_GAP_S cannot still be held. The silence rules
+        used to ignore that: a hands-free take whose stopping press lost its
+        release was left recording, with other audio at 15%, until max_seconds,
+        which is exactly what they are there to prevent. A key that is held for
+        real and sends no repeats (a driver) is treated as released after 1.5
+        s here; the rules need 60-90 s of silence to act, so that costs nothing.
+        """
+        return (self.key_down
+                and time.perf_counter() - self._down_at < KEY_REPEAT_GAP_S)
+
+    def _hands_free_idle(self, started: float) -> bool:
+        """The hands-free silence rules, for the take that began at `started`.
+
+        Called by the watchdog every 0.25 s. True = it ended the take (the
+        watchdog has nothing left to do).
+
+        Only for a take that is hands-free AND whose key is not down: a held
+        key is somebody speaking right now, and a press in hands-free (to stop
+        it, or by someone who did not notice hands-free and holds the key to
+        speak) is not to be cut from under their finger — its release stops
+        the take anyway. While either holds, nothing is read from the
+        recorder; the next call catches up on the sound in one go. "Down" means
+        down and repeating (see _key_is_held), not just not yet released.
+
+        What it does, and why. 01.10.2026: an accidental tap left hands-free
+        on for 300 s with nobody speaking, other audio ducked to 15% and the
+        microphone held all that time. Since 10.08 the journals have 17 takes
+        of 45+ s with at most a dozen words in them. audio.VoiceWatch says
+        what to do, and has the measurements behind the numbers:
+          cancel — no voice at all for handsfree_silent_cancel_s: dropped like
+                   Esc, row "handsfree_silent" and the sound kept; the screen
+                   says so for CANCEL_NOTICE_S;
+          stop   — voice, then handsfree_idle_stop_s of none: stopped as if
+                   the key had been pressed, so it is recognized and pasted;
+                   the screen says so for STOP_NOTICE_S once the text is in.
+        Both are announced because both leave the microphone idle while the
+        person may still be about to speak (a take that began 130 s after its
+        tap, a 61 s pause inside a dictation): the kept sound shows what the
+        silent stretch held, never what comes after it.
+
+        The state is read once without the lock to skip the cheap cases and
+        again under it before acting: Esc, a key press, a stop or a resume may
+        have come in between, and the take this thread was watching may be
+        over, or be a different take by now.
+
+        Nothing here may escape: this runs in the watchdog thread, whose death
+        would take the maximum-length safety net with it, and a half-done
+        cancel would leave other audio ducked.
+        """
+        watch = self._voice
+        if watch is None or not self.locked or self._key_is_held():
+            return False
+        try:
+            verdict = watch.poll(self.recorder)
+        except Exception as exc:
+            # This must never take the maximum-length safety net down with it.
+            log(f"the hands-free silence check failed and is off for this take: "
+                f"{type(exc).__name__}: {exc}")
+            if self._voice is watch:
+                self._voice = None
+            return False
+        if verdict is None:
+            return False
+        data = pre = None
+        ended = False
+        try:
+            with self._key_lock:
+                if (watch is not self._voice or not self.recording or not self.locked
+                        or self._key_is_held() or self._take_started != started):
+                    return False
+                if self.key_down:
+                    log(f"hands-free: the key is down but has not repeated for "
+                        f"{KEY_REPEAT_GAP_S:.1f} s — its release was lost, the "
+                        f"silence rule goes ahead")
+                if verdict == "stop":
+                    log(f"hands-free: no voice for {watch.idle_stop_s:.0f} s after "
+                        f"the last speech — ending the take")
+                    self.stop_and_process(
+                        notice=f"quiet {watch.idle_stop_s:.0f} s — ended")
+                    return True
+                data = self._abort_take()
+                ended = True
+                pre = self.recorder.last_preroll_s
+                self.hud.set("warn", "no speech — cancelled",
+                             hide_after=CANCEL_NOTICE_S)
+                log(f"hands-free: nobody spoke for {watch.silent_cancel_s:.0f} s — "
+                    f"take cancelled, other audio given back")
+        except Exception as exc:
+            log(f"the hands-free silence rule failed while acting and is off for "
+                f"this take: {type(exc).__name__}: {exc}")
+            if self._voice is watch:
+                self._voice = None
+        # Outside the lock: writing the sound must not hold the keys up. Also
+        # after a failure above, when the take was already taken apart.
+        if data is not None and len(data):
+            self._drop("handsfree_silent", data, pre)
+        return ended
+
+    def stop_and_process(self, notice: str = "") -> None:
+        """Ends the take and recognizes it. `notice`: see _finish."""
+        with self._key_lock:
+            if not self.recording:
+                return
+            self.recording = self.locked = False
+            self._stop_on_up = False
+            self.hud.set("think", "thinking")
+            # Registered here, on the key's own thread, not by the thread
+            # below: a press that comes before that thread has even started
+            # must already be able to take the stop back.
+            req = self.recorder.begin_stop()
         # Stop on another thread: recording the tail waits a fraction of a
         # second, and on the keyboard thread that wait would block every other
         # key.
-        threading.Thread(target=self._finish, daemon=True).start()
+        threading.Thread(target=self._finish, args=(req, notice),
+                         daemon=True).start()
 
-    def _finish(self) -> None:
+    def _finish(self, req=None, notice: str = "") -> None:
+        """Hands the take over and processes it.
+
+        `notice` is for a stop that nobody asked for (the hands-free quiet
+        rule): once the text is pasted, this line stays on the screen for
+        STOP_NOTICE_S, because from here on the microphone is idle and the
+        person, who is still talking to it, has no other way to know.
+        """
         self.hot_window = paste_mod.foreground_exe()
         data = self.recorder.stop(
-            tail_s=self.tail_s, quiet_ms=self.tail_quiet_ms
+            tail_s=self.tail_s, quiet_ms=self.tail_quiet_ms, request=req
         )
+        if data is None:
+            # A press during the tail continued this take (Recorder.resume).
+            # It is still recording and still ducking; it will be processed
+            # after its own next release.
+            return
+        # What belongs to THIS take is read now: a take that waits its turn in
+        # process() must not pick up the next take's numbers.
+        pre = self.recorder.last_preroll_s
+        xr = self.recorder.last_xruns
+        kinds = ", ".join(self.recorder.last_xrun_kinds)
         self.ducker.restore()
-        self.process(data)
+        pasted = self.process(data, preroll_s=pre, xruns=xr, xrun_note=kinds)
+        if notice and pasted:
+            self._announce(notice, STOP_NOTICE_S)
+
+    def _announce(self, text: str, seconds: float) -> None:
+        """A grey line on the screen, unless a take is being recorded right now.
+
+        The state is read under the key lock, which start() also runs under: a
+        notice must never land on top of the dot of a take that has just begun.
+        """
+        with self._key_lock:
+            if not self.recording:
+                self.hud.set("warn", text, hide_after=seconds)
 
     # ---------- processing ----------
     def transcribe_resilient(self, audio: np.ndarray,
@@ -679,10 +1122,19 @@ class Dictation:
         on a statement. It is the only thing here that can hear a question with
         no question word in it, and 14 of the 24 lost ones were exactly that.
 
+        A phrase that ends on "...", "…" or a comma, colon, dash is a phrase the
+        speaker broke off: there is no question to hear in half a sentence, and
+        a "?" after it is plain wrong. Over 10.09-30.09, 4 of 88 takes that
+        ended on "..." got a voice question mark ("Where is the..." turned into
+        "Where is the?"), and one that ended on a comma was pasted as "Firstly,?".
+        Those are left alone, and the recognizer is not even asked.
+
         Returns the new text, or None to leave everything as it was.
         """
         self.last_sound_q = None
         if not self.sound_questions or "?" in final or not final.strip():
+            return None
+        if final.rstrip().endswith(CUT_OFF_ENDINGS):
             return None
         t0 = time.perf_counter()
         d = self.asr.question_score(data, raw)
@@ -697,24 +1149,142 @@ class Dictation:
             f"{self.sound_threshold:+.1f}, {took*1000:.0f} ms) — mark put back")
         return new_text
 
-    def process(self, data: np.ndarray) -> None:
-        if not self.busy.acquire(blocking=False):
-            log("the previous take is still being processed — skipping")
-            return
+    # ---------- one take at a time, in the order they were spoken ----------
+    def _turn_take(self) -> int:
+        """Draws the next number in the queue for the recognizer."""
+        with self._turn_cv:
+            n = self._turn_next
+            self._turn_next += 1
+            return n
+
+    def _turn_wait(self, n: int, timeout: float) -> bool:
+        """Waits until it is take n's turn. False if it gave up (n is struck off)."""
+        end = time.perf_counter() + timeout
+        with self._turn_cv:
+            while self._turn_serving != n:
+                left = end - time.perf_counter()
+                if left <= 0:
+                    self._turn_skipped.add(n)
+                    return False
+                self._turn_cv.wait(left)
+            return True
+
+    def _turn_done(self, n: int) -> None:
+        with self._turn_cv:
+            self._turn_serving = n + 1
+            while self._turn_serving in self._turn_skipped:
+                self._turn_skipped.discard(self._turn_serving)
+                self._turn_serving += 1
+            self._turn_cv.notify_all()
+
+    def _drop(self, reason: str, data: np.ndarray, preroll_s: float, *,
+              xruns: int = 0, raw: str = "", error: str = "",
+              ms_asr: int | None = None) -> dict | None:
+        """Keeps a trace (row + sound) of a take that was thrown away.
+
+        See write_dropped. Never raises: a full disk must not turn one lost
+        take into two.
+        """
+        try:
+            pre_n = min(len(data), int(preroll_s * audio_mod.TARGET_SR))
+            peak, rms = audio_mod.loudness(data[pre_n:])
+            secs = (len(data) - pre_n) / audio_mod.TARGET_SR
+            keep = bool(self.cfg.get("learn", {}).get("keep_audio", True))
+            return write_dropped(
+                cfg_mod.LOG_DIR, cfg_mod.REC_DIR, reason, data, secs=secs,
+                peak=peak, rms=rms, preroll_s=preroll_s, raw=raw, xruns=xruns,
+                error=error, ms_asr=ms_asr, keep_audio=keep,
+            )
+        except Exception as exc:
+            try:
+                log(f"could not keep a trace of a dropped take ({reason}): {exc}")
+            except Exception:
+                pass
+            return None
+
+    def process(self, data: np.ndarray, preroll_s: float | None = None,
+                xruns: int = 0, xrun_note: str = "") -> bool:
+        """Recognizes, corrects and pastes one take — after the ones before it.
+
+        Until 01.10.2026 a take that found the previous one still being
+        processed was simply skipped ("still being processed — skipping"): the
+        phrase was lost, the audio too. It happens when a short take follows
+        another while the first still waits for the recognizer or the corrector
+        (the first take after a break waits about 2 s for the corrector to wake
+        up, see _keep_warm). Now it waits, and the takes go out in the order
+        they were spoken. Only a take that has waited BUSY_WAIT_S (a hung GPU)
+        gives up, and even then its sound is kept.
+
+        preroll_s / xruns belong to THIS take and are read by the caller when
+        the take was handed over; read later from the recorder they would be
+        the next take's.
+
+        Returns True when the text was pasted (see _finish, which says so on
+        the screen after a stop that nobody asked for).
+        """
+        t_wait = time.perf_counter()
+        if preroll_s is None:
+            preroll_s = self.recorder.last_preroll_s
+        ticket = self._turn_take()
+        got = self._turn_wait(ticket, BUSY_WAIT_S)
+        if got:
+            left = max(0.0, BUSY_WAIT_S - (time.perf_counter() - t_wait))
+            got = self.busy.acquire(timeout=left)
+            if not got:
+                self._turn_done(ticket)
+        waited = time.perf_counter() - t_wait
+        if not got:
+            log(f"the take before this one did not finish in {BUSY_WAIT_S:.0f} s "
+                f"— this one is not processed, its sound is kept")
+            self.hud.set("err", "still busy", hide_after=3.0)
+            self._drop("queue_timeout", data, preroll_s, xruns=xruns)
+            return False
+        try:
+            if waited > BUSY_LOG_S:
+                log(f"the previous take was still being processed — this one "
+                    f"waited {waited:.1f} s for its turn")
+            return bool(self._process_take(data, preroll_s, xruns, xrun_note))
+        finally:
+            self.busy.release()
+            self._turn_done(ticket)
+
+    def _process_take(self, data: np.ndarray, preroll_s: float, xruns: int,
+                      xrun_note: str) -> None:
+        raw = ""
+        pasted = False
         try:
             t_all = time.perf_counter()
             # The pre-roll is sound from before the key went down. It is fed to
             # the recognizer on purpose (that is what saves the first syllable)
             # but it is not speech time and must not count as such.
-            pre_n = min(len(data), int(self.recorder.last_preroll_s * audio_mod.TARGET_SR))
+            pre_n = min(len(data), int(preroll_s * audio_mod.TARGET_SR))
             secs = (len(data) - pre_n) / audio_mod.TARGET_SR
             peak, rms = audio_mod.loudness(data[pre_n:])
+            if xruns > 0:
+                # The sound driver says it dropped sound inside this take. The
+                # words that were in it are not in the recording, and the
+                # recognizer cannot know. Counted per take since 01.10.2026; on
+                # 30.09 a check of 4036 recordings found no such hole, so a
+                # line here means something has changed.
+                log(f"  the sound driver reported {xruns} dropped block(s) "
+                    f"during this take"
+                    + (f" ({xrun_note})" if xrun_note else "")
+                    + " — some words may be missing")
+            if len(data) == 0:
+                # Nothing at all came back from the recorder: the press did not
+                # start a take, or the stream was gone. Not the same as a tap.
+                self.hud.set("warn", "too short", hide_after=1.2)
+                log("the take came back with no sound at all")
+                self._drop("no_audio", data, preroll_s, xruns=xruns)
+                return
             if secs < MIN_SECONDS:
                 self.hud.set("warn", "too short", hide_after=1.2)
+                self._drop("too_short", data, preroll_s, xruns=xruns)
                 return
             if rms < SILENCE_RMS:
                 self.hud.set("warn", "silence on the mic", hide_after=2.0)
                 log(f"silence: {secs:.1f} s, peak {peak:.4f}")
+                self._drop("silence", data, preroll_s, xruns=xruns)
                 return
 
             # The level the microphone actually delivered decides the next take.
@@ -727,12 +1297,36 @@ class Dictation:
             raw, t_asr = self.transcribe_resilient(audio_mod.normalize(data), secs)
             if not raw.strip():
                 self.hud.set("warn", "nothing recognized", hide_after=1.5)
+                self._drop("nothing_recognized", data, preroll_s, xruns=xruns,
+                           ms_asr=int(t_asr * 1000))
+                return
+            # Silence pulled up loud enough to be heard as a word ("Yep.").
+            from .asr import heard_nothing
+
+            if heard_nothing(data):
+                self.hud.set("warn", "heard nothing", hide_after=2.0)
+                log(f"no speech in {secs:.1f} s of quiet sound, yet the recognizer "
+                    f"wrote {raw.strip()!r} — not pasted, audio kept")
+                self._drop("no_speech", data, preroll_s, xruns=xruns,
+                           raw=raw.strip(), ms_asr=int(t_asr * 1000))
+                return
+            # A recording nobody stopped, with a few words from the room in it.
+            from .asr import forgotten_take
+
+            if secs >= self.max_seconds - 1 and forgotten_take(data):
+                self.hud.set("warn", "forgotten take — not pasted", hide_after=8.0)
+                log(f"a {secs:.0f} s take ran into the maximum length with almost "
+                    f"no speech in it ({raw.strip()!r}) — not pasted, audio kept")
+                self._drop("forgotten", data, preroll_s, xruns=xruns,
+                           raw=raw.strip(), ms_asr=int(t_asr * 1000))
                 return
 
             # The recognizer's stock line for "I heard nothing but had to say
             # something" — subtitle credits it was trained on. Pasting it is
-            # worse than pasting nothing: it looks like a real take. The wav
-            # stays on disk either way, so nothing is actually lost.
+            # worse than pasting nothing: it looks like a real take. The sound
+            # is kept (logs/dropped + recordings/<day>/dropped), so nothing is
+            # actually lost. Until 01.10.2026 this comment promised that and the
+            # code did not do it: the audit of 30.09 found no wav for any of them.
             from .asr import subtitle_ghost
 
             ghost = subtitle_ghost(raw)
@@ -744,6 +1338,16 @@ class Dictation:
                 how = "silence" if secs < 3 else f"{secs:.0f} s OF SPEECH"
                 log(f"the recognizer filled {how} with a stock subtitle line "
                     f"({raw.strip()!r}) — not pasted, audio kept")
+                self._drop("subtitle_ghost", data, preroll_s, xruns=xruns,
+                           raw=raw.strip(), ms_asr=int(t_asr * 1000))
+                return
+            # A cough or a hum written down as "Кхм." / "Ммм." — not a take.
+            from .asr import just_a_sound
+
+            if just_a_sound(raw):
+                self.hud.set("warn", "nothing recognized", hide_after=1.5)
+                self._drop("just_a_sound", data, preroll_s, xruns=xruns,
+                           raw=raw.strip(), ms_asr=int(t_asr * 1000))
                 return
 
             pre, n_pre = self.fixes.apply(raw)
@@ -766,6 +1370,9 @@ class Dictation:
                     f" (dictation continues; the text comes out raw)")
                 self.hud.set("warn", "corrector off", hide_after=3.0)
             final, _ = self.fixes.apply(polished)
+            from .polish import open_with_capital
+
+            final = open_with_capital(final)
             sound_q = self.ask_the_sound(data, raw, final)
             if sound_q is not None:
                 final = sound_q
@@ -775,6 +1382,7 @@ class Dictation:
                 self.cfg["paste"].get("hotkey", "ctrl+v"),
                 float(self.cfg["paste"].get("restore_clipboard_after_s", 1.0)),
             )
+            pasted = True
 
             total = time.perf_counter() - t_all
             promoted = self.learner.observe(pre, polished)
@@ -791,7 +1399,7 @@ class Dictation:
                     # the microphone was opened from cold on this press and the
                     # first syllable is at risk — the thing that was happening
                     # on 68% of takes until 29.08.2026.
-                    "preroll_s": round(self.recorder.last_preroll_s, 3),
+                    "preroll_s": round(preroll_s, 3),
                     "raw": raw,
                     "after_fixes": pre,
                     "final": final,
@@ -802,8 +1410,14 @@ class Dictation:
                                 else round(self.last_sound_q, 2)),
                     "ms_asr": int(t_asr * 1000),
                     "asr_model": self.asr.last_model,
+                    # The hint read back on the last window of a long take
+                    # instead of speech, and what was done about it.
+                    "asr_echo": getattr(self.asr, "last_echo", None),
                     "ms_polish": int(t_pol * 1000),
                     "ms_total": int(total * 1000),
+                    # Blocks of sound the driver admitted dropping inside this
+                    # take (0 on every take checked on 30.09).
+                    "xruns": int(xruns),
                     "fixes_applied": n_pre,
                     "endings_fixed": flipped,
                     "learned": promoted,
@@ -826,11 +1440,14 @@ class Dictation:
                 log(f"  restored the order: {src!r} -> {dst!r}")
             for src, dst in promoted:
                 log(f"  learned: {src!r} -> {dst!r}")
+            return True
         except Exception as exc:
             self.hud.set("err", "failed", hide_after=2.5)
             log(f"FAILED: {type(exc).__name__}: {exc}")
-        finally:
-            self.busy.release()
+            if not pasted:
+                # The take is lost to the person, but its sound need not be.
+                self._drop("failed", data, preroll_s, xruns=xruns, raw=raw,
+                           error=f"{type(exc).__name__}: {exc}")
 
     def run(self) -> None:
         threading.Thread(target=self.boot, daemon=True).start()

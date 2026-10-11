@@ -151,6 +151,10 @@ def _herdr_paste(text: str) -> str:
     return pane
 
 
+_restore_lock = threading.Lock()
+_restore = {"gen": 0, "pending": False, "saved": "", "pasted": ""}
+
+
 def paste_text(text: str, hotkey: str = "ctrl+v", restore_after: float = 1.0) -> bool:
     """Отдаёт текст в активное окно. В herdr — её командой, иначе Ctrl+V."""
     global last_route
@@ -165,6 +169,13 @@ def paste_text(text: str, hotkey: str = "ctrl+v", restore_after: float = 1.0) ->
         # herdr не ответила — пробуем как обычно, вдруг долетит
 
     saved = _read_clipboard()
+    with _restore_lock:
+        # Two takes pasted less than restore_after apart (the processing queue
+        # makes that possible since 01.10.2026): the clipboard now holds the
+        # previous take, not what the owner had copied. Put back the owner's
+        # copy, and let only the latest timer do it.
+        if _restore["pending"] and saved == _restore["pasted"]:
+            saved = _restore["saved"]
     if not _copy(text):
         return False
     time.sleep(0.04)  # the Windows clipboard needs a moment to settle
@@ -172,8 +183,17 @@ def paste_text(text: str, hotkey: str = "ctrl+v", restore_after: float = 1.0) ->
     last_route = hotkey
 
     if saved and restore_after > 0:
+        with _restore_lock:
+            _restore["gen"] += 1
+            mine = _restore["gen"]
+            _restore.update(pending=True, saved=saved, pasted=text)
+
         def restore():
             time.sleep(restore_after)
+            with _restore_lock:
+                if _restore["gen"] != mine:
+                    return
+                _restore["pending"] = False
             _copy(saved)
 
         threading.Thread(target=restore, daemon=True).start()

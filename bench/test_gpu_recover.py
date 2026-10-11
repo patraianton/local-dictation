@@ -31,7 +31,7 @@ class FakeAsr(Asr):
         self.model_name = "fake"
         self.compute_type = "float16"
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, speech_s=None):
         if self.fails > 0:
             self.fails -= 1
             raise self.exc
