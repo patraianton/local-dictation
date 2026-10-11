@@ -495,6 +495,7 @@ def constrain(
     text = keep_cut_off(raw, text)
     text = balance_quotes(raw, text)
     text = keep_da_net(raw, text)
+    text = keep_aside_commas(raw, text)
     return DOUBLE_DOT_RE.sub(".", no_false_question(raw, text))
 
 
@@ -581,6 +582,31 @@ def keep_da_net(raw: str, text: str) -> str:
     if not left:
         return text
     return DA_COMMA_NET_RE.sub(r"\1 \2", text, count=left)
+
+
+# Words said as an aside in the middle of a sentence, never a part of it.
+ASIDES = ("блядь", "бля", "короче", "типа", "кстати", "наверное", "конечно",
+          "пожалуйста", "нахуй", "сука")
+# The word after is looked at, not taken: "ключи" in "где, блядь, ключи, кстати,
+# от" is the word after one aside and the word before the next.
+ASIDE_RE = re.compile(r"(\w+), (" + "|".join(ASIDES) + r"), (?=(\w+))", re.IGNORECASE)
+
+
+def keep_aside_commas(raw: str, text: str) -> str:
+    """Gives back a comma the corrector took away from around an aside.
+
+    An aside is set off by commas on both sides, and the recognizer writes them.
+    The corrector drops one of them now and then (made-up examples of what it
+    did): "где, блядь, ключи" came out as "где блядь ключи", "потому что,
+    короче, склад" as "потому что короче, склад". In 16 of 1,269 takes with
+    such an aside from August to 11.10.2026. Only where the recognizer had both
+    commas, with the same words on either side.
+    """
+    for m in ASIDE_RE.finditer(raw or ""):
+        a, w, b = (re.escape(g) for g in m.groups())
+        text = re.sub(rf"(?<!\w)({a}),? ({w}),? ({b})(?!\w)", r"\1, \2, \3", text,
+                      count=1, flags=re.IGNORECASE)
+    return text
 
 
 CUT_OFF_RE = re.compile(r"(\.{3,}|…)\s*$")
