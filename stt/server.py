@@ -19,6 +19,7 @@ class Handler(BaseHTTPRequestHandler):
     fixes = None      # injected at startup so edits can teach the dictionary
     on_terms = None   # called when the term list has changed
     polisher = None   # the corrector: the page shows and switches its model
+    busy = None       # Dictation.busy_state: is a take being recorded or handled
     # HTTP/1.1 is needed for the Expect: 100-continue header to work: without
     # it, strict clients abort a POST halfway (a browser would swallow it, but
     # then such a server could not be tested).
@@ -82,6 +83,17 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 st["page_version"] = 0
             return self._json(st)
+
+        if path == "/api/busy":
+            # A restart must not cut a take: start-background.ps1 -Restart
+            # waits while this says recording or processing.
+            if self.busy is None:
+                return self._json({"recording": False, "processing": 0, "known": False})
+            try:
+                return self._json(dict(self.busy(), known=True))
+            except Exception as exc:
+                return self._json({"recording": False, "processing": 0, "known": False,
+                                   "error": str(exc)})
 
         if path == "/api/audio":
             p = store.audio_path(q.get("id", [""])[0])
@@ -163,11 +175,12 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, b"not found", "text/plain")
 
 
-def start(port: int = 8756, fixes=None, on_terms=None, polisher=None) -> str:
+def start(port: int = 8756, fixes=None, on_terms=None, polisher=None, busy=None) -> str:
     """Starts the page on its own thread. Returns the address."""
     Handler.fixes = fixes
     Handler.on_terms = staticmethod(on_terms) if on_terms else None
     Handler.polisher = polisher
+    Handler.busy = staticmethod(busy) if busy else None
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{port}/"

@@ -373,7 +373,7 @@ class Dictation:
             try:
                 url = server.start(
                     int(web.get("port", 8756)), self.fixes, self.reload_terms,
-                    self.polisher,
+                    self.polisher, busy=self.busy_state,
                 )
                 log(f"dictation page: {url}")
                 if web.get("open_on_start", False):
@@ -1185,6 +1185,19 @@ class Dictation:
                     return False
                 self._turn_cv.wait(left)
             return True
+
+    def busy_state(self) -> dict:
+        """Whether a take is being recorded or is still to be pasted.
+
+        Asked by the page (/api/busy) and by start-background.ps1 -Restart,
+        which waits for it: a restart run on "nobody has dictated for ten
+        minutes" landed 5 s after a 16 s take that was still being spoken when
+        the check passed (11.10.2026), and a restart a few seconds earlier would
+        have killed it."""
+        with self._turn_cv:
+            waiting = max(0, self._turn_next - self._turn_serving)
+        armed = bool(getattr(self.recorder, "_armed", False))
+        return {"recording": bool(self.recording) or armed, "processing": waiting}
 
     def _turn_done(self, n: int) -> None:
         with self._turn_cv:
