@@ -157,8 +157,10 @@ model = "large-v3-turbo"
 #   Вочисть его, конечно      -> Очисти его, конечно
 #   Пластический клиент       -> Платящий клиент
 #   Аксим / Версара / лавиш   -> Максим / Vercel / Lavish
-# On LONG takes it is the other way round and four times slower (1.15 s
-# against 0.27 s), so the switch is by length, not for everything.
+# On LONG takes it was the other way round then and four times slower (1.15 s
+# against 0.27 s), so the switch is by length, not for everything. With the
+# later long-take fixes (timestamps, the hint over every window, no penalty on
+# repeated words) large-v3 won up to 60 s as well - see short_seconds.
 # Costs 3 GB of video memory and 4 seconds at start-up. Empty = off.
 short_model = "large-v3"
 # Takes up to this many seconds go to that model. Above it, turbo.
@@ -168,7 +170,15 @@ short_model = "large-v3"
 # different words in 86; three blind judges (majority) preferred large-v3 in 31
 # and turbo in 11 (44 even). By length: 3-6 s 12 to 1, 6-12 s 11 to 9, 12-20 s
 # 8 to 1. Past 20 s it was not measured and timestamps take over at 25 s.
-short_seconds = 20.0
+# Was 20.0 until 12.10.2026. Measured then on 60 random takes of 20-90 s from
+# the ten days before, both models read with the live long-take settings
+# (timestamps and the hint over every window past 25 s): different words in 52;
+# three blind judges (majority) preferred large-v3 in 23 and turbo in 10 (19
+# even). By length: 20-30 s 14 to 4, 30-60 s 9 to 3, over 60 s 0 to 3 (only 4
+# takes; there turbo spelled the terms better and large-v3 dropped a few
+# words). The price is time: large-v3 reads 4-5 times slower than turbo, so a
+# 30 s take is pasted about 1.5 s later and a 60 s one about 3 s later.
+short_seconds = 60.0
 # Takes longer than this many seconds are read with timestamps. The recognizer
 # reads sound in 30-second windows, and without timestamps whatever it did not
 # finish in one window was skipped. Measured 30.09.2026 over September: of 136
