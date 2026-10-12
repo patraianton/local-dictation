@@ -7,7 +7,8 @@ really said that way or the live read got them wrong.
     python loop/relisten.py recordings/<day>/<take>.wav --variants [model]
         the live settings, then the same with one setting off or flipped at a
         time (hint, penalty on repeated words, speech filter, timestamps), to
-        find the setting that changes the text
+        find the setting that changes the text. Without [model], the model the
+        app gives a take of this length (short_model up to short_seconds).
 
 The CPU read is not the live read: the live one runs on the video card in
 float16, so the two can differ by a word on their own. A word that every read
@@ -47,6 +48,7 @@ def variants(audio: np.ndarray, cfg: dict, name: str) -> None:
     hint = build_prompt(ranked, int(cfg["asr"].get("prompt_terms", 45)),
                         cfg["asr"].get("prompt_style", "list"))
     m = WhisperModel(name, device="cpu", compute_type="int8")
+    print(f"(model: {name})")
     asr = Asr(cfg, terms)
     long_take = len(audio) / 16000 > asr.timestamps_after_s
     live_rep = asr.repetition_penalty
@@ -69,6 +71,16 @@ def variants(audio: np.ndarray, cfg: dict, name: str) -> None:
     run("timestamps flip", ts=not long_take, every=False)
 
 
+def live_model(audio: np.ndarray, cfg: dict) -> str:
+    """The model the app gives a take this long. Always taking the main model
+    made «live» on a short take the other model's read, and a word that model
+    got right looked like a chance slip of the video card."""
+    a = cfg["asr"]
+    main_model = a.get("model", "large-v3-turbo")
+    short = a.get("short_model") or main_model
+    return short if len(audio) / 16000 <= float(a.get("short_seconds", 3.0)) else main_model
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     args = sys.argv[1:]
@@ -79,7 +91,7 @@ def main() -> None:
     cfg = cfg_mod.load()
     if "--variants" in args:
         rest = args[args.index("--variants") + 1:]
-        variants(audio, cfg, rest[0] if rest else cfg["asr"].get("model", "large-v3-turbo"))
+        variants(audio, cfg, rest[0] if rest else live_model(audio, cfg))
     else:
         plain(audio, cfg["asr"].get("language", "ru"))
 
