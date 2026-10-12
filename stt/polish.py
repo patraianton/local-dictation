@@ -585,8 +585,8 @@ def keep_da_net(raw: str, text: str) -> str:
 
 
 # Words said as an aside in the middle of a sentence, never a part of it.
-ASIDES = ("блядь", "бля", "короче", "типа", "кстати", "наверное", "конечно",
-          "пожалуйста", "нахуй", "сука")
+ASIDES = ("блядь", "блять", "бля", "блин", "короче", "типа", "кстати", "наверное",
+          "конечно", "пожалуйста", "нахуй", "сука")
 # The word after is looked at, not taken: "ключи" in "где, блядь, ключи, кстати,
 # от" is the word after one aside and the word before the next.
 ASIDE_RE = re.compile(r"(\w+), (" + "|".join(ASIDES) + r"), (?=(\w+))", re.IGNORECASE)
