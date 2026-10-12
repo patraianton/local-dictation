@@ -62,12 +62,30 @@ def _with_mark(text: str, mark: str) -> str:
     return t + mark
 
 
+# One letter, or a pair or three of them, said over and over inside one word:
+# the same loop at the level of letters. 12.10.2026: an 8 s take with a
+# stammer at the start ("А, и... и... иди сам вставь...") came out as "Аааа, "
+# and one "и" repeated four hundred times; it took 17 s to read, every word of
+# it was lost, and the word-level check below saw only two words. A drawn-out
+# "ааааа" or "хммм" in speech stays well under this.
+LETTER_LOOP_RE = re.compile(r"(\w{1,3}?)\1{11,}", re.UNICODE)
+
+
+def collapse_letter_loops(text: str) -> str:
+    """What every retry still looped on, cut down to three of its unit: a wall
+    of one letter helps nobody, and the words around it are still worth having."""
+    return LETTER_LOOP_RE.sub(lambda m: m.group(1) * 3, text or "")
+
+
 def looped(text: str, times: int = 4) -> bool:
     """Detects a decoding loop: the same word triple repeating over and over.
 
     A real failure mode of the recognizer — it slides into
     "Харьков, Мори, Харьков, Мори..." and fills half the screen with garbage.
+    The same happens inside a single word (LETTER_LOOP_RE).
     """
+    if LETTER_LOOP_RE.search(text or ""):
+        return True
     words = PUNCT_RE.sub(" ", text.lower()).split()
     if len(words) < times * 3:
         return False
@@ -706,6 +724,7 @@ class Asr:
         # five-minute take) — the old way loses words but does not loop there.
         if long and looped(text):
             text = self._run(audio, self.prompt, model)
+        text = collapse_letter_loops(text)
         self.last_echo = None
         if long:
             text = strip_ghost_tail(text)
