@@ -330,7 +330,7 @@ class Dictation:
         log(f"recognizer {self.asr.model_name} on {self.asr.device}: {took:.1f} s")
         if self.asr.short is not None:
             log(f"short takes (up to {self.asr.short_seconds:.0f} s) go to "
-                f"{self.asr.short_model_name} — it hears a one-word command better")
+                f"{self.asr.short_model_name} — it hears them better (see short_seconds in config.toml)")
         elif self.asr.short_model_name:
             log(f"the second model {self.asr.short_model_name} did not load — "
                 f"short takes go to {self.asr.model_name} as before")
