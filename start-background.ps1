@@ -78,9 +78,9 @@ Start-Process -FilePath $pyw -ArgumentList "-u", "-m", "stt" `
     -RedirectStandardOutput $out -RedirectStandardError $err | Out-Null
 
 Start-Sleep -Seconds 3
-$now = @(Get-Dictation)
-if ($now) {
-    "started, process $($now[0].ProcessId)"
+$up = @(Get-Dictation)
+if ($up) {
+    "started, process $($up[0].ProcessId)"
     "log: $out"
     "page: http://127.0.0.1:8756/"
     "The model loads in ~2 seconds. F13 works right after that."
