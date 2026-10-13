@@ -265,9 +265,21 @@ def hint_echo_at(text: str, hint: str) -> int:
     too (a list of two tools said aloud), so this only says "look again": the
     caller reads the take the old way and believes the echo only if that read
     does not end the same.
+
+    The heading of the list read back counts too: on 13.10.2026 a 49 s take
+    read by large-v3 ended in "Термины и названия." three times over, words
+    nobody had said in the 10,000 takes before it.
     """
     terms = hint_terms(hint)
     best = -1
+    for mark in HINT_MARKS:
+        if mark in hint:
+            label = re.escape(mark.rstrip(":"))
+            m = re.search(rf"(?:[\s,.:;]*(?<!\w){label}[.:;]?)+[\s.!?…]*$", text or "",
+                          re.IGNORECASE)
+            if m:
+                best = m.start()
+            break
     for i in range(len(terms) - 1):
         pair = re.compile(
             r"(?<!\w)" + re.escape(terms[i]) + r"\s*,\s*" + re.escape(terms[i + 1]) + r"(?!\w)",

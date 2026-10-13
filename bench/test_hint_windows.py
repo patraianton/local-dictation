@@ -251,9 +251,10 @@ def main():
                   f"keeps ({same} unchanged, the rest minus a broken first word)")
 
     # --- 6. The hint read back in the last window ---
-    from stt.asr import hint_echo_at, hint_terms
+    from stt.asr import HINT_MARKS, hint_echo_at, hint_terms
 
     base = Asr(CFG, TERMS).prompt
+    HEADING = HINT_MARKS[0].rstrip(":")      # the hint's own words, not speech
     if hint_terms(base) != TERMS:
         fail(f"the terms must be read back out of the hint: {hint_terms(base)}")
     if hint_terms("без списка") != []:
@@ -265,6 +266,9 @@ def main():
         "case does not matter": "Сделай отчёт, alpha tool, BETA-RUNNER.",
         "a run from the middle of the list": "Сделай отчёт, beta-runner, Gamma, delta sync.",
         "no mark at all": "Сделай отчёт, Alpha Tool, beta-runner",
+        "the heading of the list": "Сделай отчёт, " + HEADING.lower() + ".",
+        "the heading, over and over": "Сделай отчёт. " + f"{HEADING}. " * 2,
+        "the heading with its colon": "Сделай отчёт, " + HEADING + ":",
     }
     for why, text in spot.items():
         if hint_echo_at(text, base) < 0:
@@ -279,6 +283,9 @@ def main():
         "part of a longer word": "Сделай отчёт, Alpha Tools, beta-runner.",
         "a plain take": "Сделай отчёт по клиентам и отправь его завтра утром.",
         "no text": "",
+        "the heading not at the end": "Термины и названия надо проверить сегодня.",
+        "only half the heading": "Добавь в отчёт термины.",
+        "the heading inside a longer word": "Сделай отчёт, сверхтермины и названия.",
     }
     for why, text in quiet.items():
         if hint_echo_at(text, base) >= 0:
@@ -314,6 +321,11 @@ def main():
     text, _ = asr.transcribe(secs(40))
     if text != ECHO or len(asr.model.calls) != 2 or asr.last_echo["used"] != "first":
         fail(f"words that were really said must stay: {text!r}, {asr.last_echo}")
+    # the heading of the list read back: the old way has the real last words
+    asr = make(True, answers=window_two(REAL + ", " + f"{HEADING}. " * 2, OLD))
+    text, _ = asr.transcribe(secs(40))
+    if text != OLD or len(asr.model.calls) != 2:
+        fail(f"the heading read back must give the old reading: {text!r}")
     # an ordinary take is read once, and so is a take that ends in a single term
     for plain in (REAL + ".", REAL + ", потом запусти Alpha Tool."):
         asr = make(True, answers=[plain])
