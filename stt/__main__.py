@@ -704,6 +704,10 @@ class Dictation:
         busy = self._take_in_flight()
         if busy:
             log(f"paste again ignored: a take is {busy} (the button is next to the key)")
+            if busy == "being recognized":
+                # Pressed on purpose too, on a long take whose text is slow to
+                # come (13.10.2026: twice in 3 s, 49 s of speech, 7.6 s to wait).
+                self.hud.set("think", "still recognizing")
             return
         from . import mousehook
 
