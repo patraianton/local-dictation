@@ -390,7 +390,7 @@ def heard_nothing(audio: np.ndarray) -> bool:
 
 # Below this many seconds of speech, a take that ran into max_seconds was a
 # recording somebody forgot, not a dictation. See forgotten_take.
-FORGOTTEN_SPEECH_S = 15.0
+FORGOTTEN_SPEECH_S = 30.0
 
 
 def forgotten_take(audio: np.ndarray) -> bool:
@@ -402,7 +402,12 @@ def forgotten_take(audio: np.ndarray) -> bool:
     keeps such a take alive to the end. Of the 10 takes of 4+ minutes
     (24.08-10.10.2026), the 7 real dictations had 47-282 s of speech; the 3
     forgotten ones had 1-5 s, all of it somebody talking in the room, and
-    that was what got pasted. 15 s sits three times away from both.
+    that was what got pasted. 15 s sat three times away from both.
+
+    Raised to 30 s on 13.10.2026: a call in the room with 17 s of speech in
+    300 s ran past 15 s and 52 words of it were pasted. The two real
+    dictations that ran into the limit since August had 215 and 281 s of
+    speech; the least speech in any other such take was 47 s.
     """
     if audio.size == 0:
         return False

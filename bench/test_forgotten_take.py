@@ -46,7 +46,7 @@ def main() -> int:
     sound = K.speech(4.0)
     try:
         # The judgement itself.
-        for secs, want in ((0.0, True), (4.5, True), (14.9, True), (15.0, False), (47.0, False)):
+        for secs, want in ((0.0, True), (4.5, True), (14.9, True), (17.0, True), (29.9, True), (30.0, False), (47.0, False)):
             A.speech_chunks = chunks_of(secs)
             check(f"{secs:.1f} s of speech: forgotten", A.forgotten_take(sound), want)
         check("empty take: not this rule", A.forgotten_take(np.zeros(0, np.float32)), False)
@@ -69,7 +69,7 @@ def main() -> int:
         A.speech_chunks = chunks_of(2.0)
         d.process(K.speech(4.0), preroll_s=0.0)       # ran into the limit, 2 s of speech
         d.process(K.speech(2.5), preroll_s=0.0)       # stopped by hand, same 2 s
-        A.speech_chunks = chunks_of(20.0)
+        A.speech_chunks = chunks_of(60.0)
         d.process(K.speech(4.0), preroll_s=0.0)       # ran into the limit, a real dictation
 
         day = f"{datetime.now():%Y-%m-%d}"
