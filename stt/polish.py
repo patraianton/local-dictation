@@ -590,6 +590,9 @@ ASIDES = ("блядь", "блять", "бля", "блин", "короче", "т�
 # The word after is looked at, not taken: "ключи" in "где, блядь, ключи, кстати,
 # от" is the word after one aside and the word before the next.
 ASIDE_RE = re.compile(r"(\w+), (" + "|".join(ASIDES) + r"), (?=(\w+))", re.IGNORECASE)
+# What the corrector left between an aside and its neighbour: the comma, a
+# space alone, or a dash in its place.
+ASIDE_GAP = r"(?:,? |,? ?[—–] )"
 
 
 def keep_aside_commas(raw: str, text: str) -> str:
@@ -601,11 +604,16 @@ def keep_aside_commas(raw: str, text: str) -> str:
     короче, склад" as "потому что короче, склад". In 16 of 1,269 takes with
     such an aside from August to 11.10.2026. Only where the recognizer had both
     commas, with the same words on either side.
+
+    It also turned one of the commas into a dash (made-up examples again):
+    "коробку — блин, отнеси", "неси короче — на склад". 11 takes from August
+    to 13.10.2026, not one of them right: an aside is not a pause before the
+    rest of the sentence.
     """
     for m in ASIDE_RE.finditer(raw or ""):
         a, w, b = (re.escape(g) for g in m.groups())
-        text = re.sub(rf"(?<!\w)({a}),? ({w}),? ({b})(?!\w)", r"\1, \2, \3", text,
-                      count=1, flags=re.IGNORECASE)
+        text = re.sub(rf"(?<!\w)({a}){ASIDE_GAP}({w}){ASIDE_GAP}({b})(?!\w)",
+                      r"\1, \2, \3", text, count=1, flags=re.IGNORECASE)
     return text
 
 
