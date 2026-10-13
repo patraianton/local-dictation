@@ -609,6 +609,18 @@ def comma_capital(text: str) -> str:
     if not text or "," not in text:
         return text
     return COMMA_CAPITAL_RE.sub(
-        lambda m: m.group(1) + (m.group(2).lower() if ordinary_word(m.group(2)) else m.group(2)),
+        lambda m: m.group(1) + (m.group(2).lower() if ordinary_word(m.group(2))
+                                and not list_letter(m.group(2)) else m.group(2)),
         text,
     )
+
+
+# The letters that are words on their own: a conjunction, a preposition, "я".
+ONE_LETTER_WORDS = frozenset("авиксоуя")
+
+
+def list_letter(word: str) -> bool:
+    """A single capital letter that is not a word by itself labels an item of a
+    list: "вариант А пишем, Б уточню". The dictionary knows "б" (a short "бы"),
+    so without this the label lost its capital (13.10.2026)."""
+    return len(word) == 1 and word.lower() not in ONE_LETTER_WORDS

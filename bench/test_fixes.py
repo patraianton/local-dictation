@@ -120,6 +120,12 @@ APPLY_CASES = [
         "a letter that labels an item of a list keeps its capital",
     ),
     (
+        [("щас", "сейчас")],
+        "По складу вариант А берём щас, Б уточню завтра.",
+        "По складу вариант А берём сейчас, Б уточню завтра.",
+        "a list letter with no dash after it keeps its capital too",
+    ),
+    (
         [("ройсона от агентов", "рой Sonnet-агентов")],
         "Отправь туда Ройсона от агентов. Ройсона от агентов тоже.",
         "Отправь туда рой Sonnet-агентов. Рой Sonnet-агентов тоже.",
