@@ -859,10 +859,84 @@ def test_cut_off_question():
     check(got == "Мы это уже сделали?", "a finished phrase still gets it when the voice asks", str(got))
 
 
+# ---------------------------------------------------------------- 14. paste-again next to the key
+def test_repaste():
+    """The paste-again button sits next to the dictation key under the thumb.
+    Brushed on the way to the key or off it, it used to paste the PREVIOUS take
+    into the window being dictated to."""
+    from stt import mousehook
+
+    pasted = []
+    under = {"hwnd": 101}
+    saved = (M.paste_text, mousehook.window_under_cursor, mousehook.window_title,
+             mousehook.focus)
+    M.paste_text = lambda text, hotkey, restore: pasted.append((under["focused"], text))
+    mousehook.window_under_cursor = lambda: under["hwnd"]
+    mousehook.window_title = lambda hwnd: f"window {hwnd}"
+
+    def focus(hwnd):
+        under["focused"] = hwnd
+        return True
+
+    mousehook.focus = focus
+    try:
+        r = Rig()
+        d = r.d
+        d.cfg = {"paste": {}}
+        d.last = {"final": "the old take"}
+        settle = M.REPASTE_SETTLE_S + 0.3
+
+        d.on_repaste()
+        under["hwnd"] = 202              # the mouse drifts away before the paste is done
+        time.sleep(settle)
+        check(pasted == [(101, "the old take")],
+              "nothing going on: the button pastes the last take into the window it pointed at",
+              f"{pasted}")
+
+        pasted.clear()
+        r.speak(LOUD)
+        d.on_down()
+        time.sleep(0.3)
+        d.on_repaste()                   # the thumb slips onto the button mid-take
+        time.sleep(0.2)
+        real_process = d.process
+        d.process = lambda *a, **k: (time.sleep(0.8), real_process(*a, **k))[1]
+        d.on_up()
+        r.speak(QUIET)
+        time.sleep(0.3)
+        d.on_repaste()                   # ...or as it comes off the key, while recognizing
+        check(wait_for(lambda: len(r.taken) == 1), "the take itself goes through")
+        time.sleep(settle)
+        check(pasted == [], "pressed while a take is recorded or recognized: nothing pasted",
+              f"{pasted}")
+        d.process = real_process
+
+        d.on_repaste()                   # brushed on the way to the key
+        time.sleep(0.2)
+        r.speak(LOUD)
+        d.on_down()
+        time.sleep(settle)
+        check(pasted == [], "the key goes down right after the button: nothing pasted",
+              f"{pasted}")
+        check(d.recording, "and the take it started is recording")
+        d.on_up()
+        r.speak(QUIET)
+        check(wait_for(lambda: len(r.taken) == 2), "that take goes through too")
+        time.sleep(0.3)
+
+        d.on_repaste()
+        time.sleep(settle)
+        check(len(pasted) == 1, "afterwards the button works again", f"{pasted}")
+        r.done()
+    finally:
+        (M.paste_text, mousehook.window_under_cursor, mousehook.window_title,
+         mousehook.focus) = saved
+
+
 def main():
     for fn in (test_hold, test_tap_then_hold, test_resume_in_tail, test_auto_repeat, test_tap_to_stop,
                test_esc, test_toggle, test_busy_waits, test_tail, test_resume_recorder, test_dropped,
-               test_xruns, test_cut_off_question):
+               test_xruns, test_cut_off_question, test_repaste):
         print(f"--- {fn.__name__}")
         try:
             fn()

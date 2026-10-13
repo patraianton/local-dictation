@@ -45,6 +45,14 @@ SILENCE_RMS = 0.0015
 # must have been missed, so the press is treated as a new one (see on_down).
 KEY_REPEAT_GAP_S = 1.5
 
+# Paste-again (see Dictation.on_repaste) waits this long before it pastes, and
+# does not paste if the dictation key went down meanwhile: a thumb that brushes
+# the button on its way to the key. Short enough not to be felt on purpose.
+REPASTE_SETTLE_S = 0.5
+# A press of the key this soon after the button is written to the log, to see
+# how far apart the two come when the button is hit by accident.
+REPASTE_NOTE_S = 3.0
+
 # How long the screen keeps saying that a hands-free take was ended by itself
 # (see Dictation._hands_free_idle). Nothing records after a cancel, so speech
 # that begins late goes to an idle microphone and the notice is the only thing
@@ -304,6 +312,13 @@ class Dictation:
         self._turn_next = 0
         self._turn_serving = 0
         self._turn_skipped: set[int] = set()
+        # Takes between the stop and process() taking its number (the tail,
+        # the hand-over): neither "recording" nor "processing" sees them.
+        self._stopping = 0
+        # Paste-again: when the button was last pressed and when the key last
+        # went down for a new take (see on_repaste).
+        self._repaste_at = 0.0
+        self._pressed_at = 0.0
 
     # ---------- startup ----------
     def boot(self) -> None:
@@ -559,6 +574,10 @@ class Dictation:
                 self._release(now)
             self.key_down = True
             self._down_at = now
+            self._pressed_at = now
+            if 0 < now - self._repaste_at < REPASTE_NOTE_S:
+                log(f"the key went down {now - self._repaste_at:.2f} s after the "
+                    f"paste-again button")
             self._press()
 
     def on_up(self, _event=None) -> None:
@@ -659,19 +678,59 @@ class Dictation:
             self.ducker.restore()
         return data
 
+    def _take_in_flight(self) -> str:
+        """What a take is doing right now, or "" when there is none."""
+        b = self.busy_state()
+        if self.key_down or b["recording"]:
+            return "being recorded"
+        if b["processing"] or self._stopping:
+            return "being recognized"
+        return ""
+
     def on_repaste(self) -> None:
         """Paste the last take into the window under the mouse.
 
         For the "the text went to the wrong place" case: point at the right
         window and press the button. The app brings it forward and pastes.
+
+        The button sits next to the dictation key under the thumb and gets
+        pressed by accident on the way to it or off it. It then pasted the
+        PREVIOUS take into the window being dictated to: in 109 presses
+        (21.08-13.10.2026) 7 came while a take was being recorded or
+        recognized and 16 within about a second of the key going down. So a
+        press while a take is in flight does nothing, and the paste waits
+        REPASTE_SETTLE_S: if the key goes down meanwhile, it is not done.
         """
+        busy = self._take_in_flight()
+        if busy:
+            log(f"paste again ignored: a take is {busy} (the button is next to the key)")
+            return
+        from . import mousehook
+
+        asked = time.perf_counter()
+        self._repaste_at = asked
+        # The window is the one pointed at when the button went down, not
+        # wherever the mouse has drifted by the time the paste is done.
+        hwnd = mousehook.window_under_cursor()
+        t = threading.Timer(REPASTE_SETTLE_S, self._repaste_now, args=(asked, hwnd))
+        t.daemon = True
+        t.start()
+
+    def _repaste_now(self, asked: float, hwnd: int) -> None:
+        if self._pressed_at > asked:
+            log(f"paste again not done: the key went down "
+                f"{self._pressed_at - asked:.2f} s after the button")
+            return
+        busy = self._take_in_flight()
+        if busy:
+            log(f"paste again not done: a take is {busy}")
+            return
         text = (self.last or {}).get("final", "")
         if not text:
             self.hud.set("warn", "nothing to paste", hide_after=1.2)
             return
         from . import mousehook
 
-        hwnd = mousehook.window_under_cursor()
         title = mousehook.window_title(hwnd)
         if not mousehook.focus(hwnd):
             self.hud.set("err", "window refused focus", hide_after=2.0)
@@ -1039,6 +1098,7 @@ class Dictation:
                 return
             self.recording = self.locked = False
             self._stop_on_up = False
+            self._stopping += 1
             self.hud.set("think", "thinking")
             # Registered here, on the key's own thread, not by the thread
             # below: a press that comes before that thread has even started
@@ -1058,24 +1118,28 @@ class Dictation:
         STOP_NOTICE_S, because from here on the microphone is idle and the
         person, who is still talking to it, has no other way to know.
         """
-        self.hot_window = paste_mod.foreground_exe()
-        data = self.recorder.stop(
-            tail_s=self.tail_s, quiet_ms=self.tail_quiet_ms, request=req
-        )
-        if data is None:
-            # A press during the tail continued this take (Recorder.resume).
-            # It is still recording and still ducking; it will be processed
-            # after its own next release.
-            return
-        # What belongs to THIS take is read now: a take that waits its turn in
-        # process() must not pick up the next take's numbers.
-        pre = self.recorder.last_preroll_s
-        xr = self.recorder.last_xruns
-        kinds = ", ".join(self.recorder.last_xrun_kinds)
-        self.ducker.restore()
-        pasted = self.process(data, preroll_s=pre, xruns=xr, xrun_note=kinds)
-        if notice and pasted:
-            self._announce(notice, STOP_NOTICE_S)
+        try:
+            self.hot_window = paste_mod.foreground_exe()
+            data = self.recorder.stop(
+                tail_s=self.tail_s, quiet_ms=self.tail_quiet_ms, request=req
+            )
+            if data is None:
+                # A press during the tail continued this take (Recorder.resume).
+                # It is still recording and still ducking; it will be processed
+                # after its own next release.
+                return
+            # What belongs to THIS take is read now: a take that waits its turn
+            # in process() must not pick up the next take's numbers.
+            pre = self.recorder.last_preroll_s
+            xr = self.recorder.last_xruns
+            kinds = ", ".join(self.recorder.last_xrun_kinds)
+            self.ducker.restore()
+            pasted = self.process(data, preroll_s=pre, xruns=xr, xrun_note=kinds)
+            if notice and pasted:
+                self._announce(notice, STOP_NOTICE_S)
+        finally:
+            with self._key_lock:
+                self._stopping = max(0, self._stopping - 1)
 
     def _announce(self, text: str, seconds: float) -> None:
         """A grey line on the screen, unless a take is being recorded right now.
