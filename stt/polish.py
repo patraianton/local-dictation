@@ -567,21 +567,25 @@ def balance_quotes(raw: str, text: str) -> str:
 DOUBLE_DOT_RE = re.compile(r"(?<!\.)\.\.(?!\.)")
 
 
-DA_NET_RE = re.compile(r"\b(да) (нет)\b", re.IGNORECASE | re.UNICODE)
-DA_COMMA_NET_RE = re.compile(r"\b(да), (нет)\b", re.IGNORECASE | re.UNICODE)
+DA_NET_RE = re.compile(r"\b(да) (нет|не|ни)\b", re.IGNORECASE | re.UNICODE)
 
 
 def keep_da_net(raw: str, text: str) -> str:
-    """Takes the corrector's comma out of a spoken "да нет".
+    """Takes the corrector's comma out of a spoken "да нет" / "да не".
 
     "Да нет" said in one breath is a soft "no"; "Да, нет" reads as a yes and
     then a no. The corrector split it in 8 of the 12 takes that had it
-    (August-October 2026). Only as many as the recognizer wrote without a comma.
+    (August-October 2026). The same with "да не надо", "да не знаю": a
+    brush-off, not a yes ("Да, не надо" reads "yes, don't") — split in 12 of
+    the 18 takes that had it, every one of them wrongly (13.10.2026). Only as
+    many as the recognizer wrote without a comma, each word counted apart.
     """
-    left = len(DA_NET_RE.findall(raw or ""))
-    if not left:
-        return text
-    return DA_COMMA_NET_RE.sub(r"\1 \2", text, count=left)
+    for word in ("нет", "не", "ни"):
+        left = sum(1 for m in DA_NET_RE.finditer(raw or "") if m.group(2).lower() == word)
+        if left:
+            text = re.sub(rf"\b(да), ({word})\b", r"\1 \2", text, count=left,
+                          flags=re.IGNORECASE | re.UNICODE)
+    return text
 
 
 # Words said as an aside in the middle of a sentence, never a part of it.
