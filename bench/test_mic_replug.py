@@ -223,8 +223,13 @@ def main():
     if not any("not plugged in" in m for m in logs):
         fail(f"в журнале нет строки «микрофон не воткнут»: {logs}")
     sd.plug({51: (PODMIC2, RAW), 52: (PODMIC2, SHARED)})
+    t_back = time.perf_counter()
+    # Пока микрофона нет, таблица перечитывается раз в REREAD_ABSENT_S, а не
+    # раз в десять секунд: до 14.10.2026 каждый короткий обрыв USB длился
+    # для диктовки 11-12 с.
     wait_for(lambda: rec.recipe and rec.recipe[0] == 51 and alive(rec._stream),
-             14.0, "микрофон подхвачен на новом номере")
+             A.Recorder.REREAD_ABSENT_S + 2.5, "микрофон подхвачен на новом номере")
+    back_s = time.perf_counter() - t_back
     time.sleep(0.6)                                     # набрать предзапись
     rec.start()
     pre = rec._pending_preroll
@@ -240,7 +245,8 @@ def main():
     rec.close()
     if (n_absent, n_back) != (1, 1):
         fail(f"журнал засорён: «не воткнут» {n_absent} раз, «найден» {n_back} раз")
-    ok.append(f"вынули при удержании — поток отпущен, чужой не взят, после втыкания подхвачен, предзапись {pre*1000:.0f} мс")
+    ok.append(f"вынули при удержании — поток отпущен, чужой не взят, после втыкания подхвачен "
+              f"за {back_s:.1f} с, предзапись {pre*1000:.0f} мс")
 
     # --- 3. Сырой путь занят (звонок в браузере): НЕ сползаем на общий путь,
     #        таблицу перечитываем не чаще раза в десять секунд, после звонка
@@ -373,6 +379,31 @@ def main():
         fail("запись, начатая в момент решения сторожа, потеряна")
     rec.close()
     ok.append("нажатие в момент решения сторожа — запись цела")
+
+    # --- 10. Короткий обрыв USB, микрофон уже вернулся, сторож ещё не успел
+    #         перечитать таблицу — нажатие клавиши перечитывает её само ---
+    logs.clear()
+    sd = FakeSD(podmic_table(), default=2)
+    rec = make(sd, hot_s=30.0, logs=logs)
+    rec.warm()
+    time.sleep(0.3)
+    sd.unplug(43, 30)
+    wait_for(lambda: any("not plugged in" in m for m in logs), 3.0,
+             "строка «микрофон не воткнут»")
+    rec._retry_at = time.perf_counter() + 100.0         # сторож больше не стучится
+    sd.plug(podmic_table())
+    time.sleep(A.Recorder.REREAD_PRESS_S + 0.1)
+    try:
+        rec.start()
+    except RuntimeError as exc:
+        fail(f"микрофон вернулся, а нажатие получило отказ: {exc}")
+    rec._stream.value = 0.4
+    time.sleep(0.3)
+    data = rec.stop()
+    rec.close()
+    if data.size == 0 or abs(float(np.median(data[-2000:])) - 0.4) > 0.02:
+        fail("после короткого обрыва записалось не то, что «слышно»")
+    ok.append("короткий обрыв USB — нажатие само находит вернувшийся микрофон")
 
     print("[v] " + "\n[v] ".join(ok))
 

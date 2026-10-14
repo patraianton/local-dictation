@@ -170,7 +170,7 @@ class Recorder:
         self.relook_s = 30.0
         self.log = lambda msg: None
         self._last_block_at = 0.0    # when the driver last handed us sound
-        self._rediscover_at = 0.0    # the device table is re-read at most every few seconds
+        self._reread_at = -1e9       # when the device table was last re-read (see _open)
         self._relooked_at = time.perf_counter()   # last look for the wanted microphone
         self._absent = False         # the wanted microphone is not plugged in
         self.want_sr = samplerate
@@ -271,7 +271,18 @@ class Recorder:
                     seen.add((sr, ch))
                     yield (dev, sr, ch)
 
-    def _open(self) -> None:
+    # How long to wait between two re-reads of the device table when nothing
+    # opens. A busy microphone (a browser call) is the common case, and a
+    # re-read cannot help it. An absent one comes back by itself, and until
+    # 14.10.2026 the ten-second wait made up most of every outage: a USB
+    # microphone that dropped for a moment was "found again" 11-12 s later,
+    # always at the first re-read allowed, and a key press 9 s into such an
+    # outage was refused although the microphone was most likely back.
+    REREAD_BUSY_S = 10.0
+    REREAD_ABSENT_S = 2.0
+    REREAD_PRESS_S = 1.0     # a key press: someone is about to speak
+
+    def _open(self, pressed: bool = False) -> None:
         """Opens the stream. Raises if nothing works."""
         with _pa_lock:
             if self._stream is not None:
@@ -290,8 +301,10 @@ class Recorder:
             # browser call, say), but it may also have been re-plugged — and
             # then every index we know is dead until the table is re-read.
             # Not on every attempt: the keeper knocks every two seconds.
-            if now >= self._rediscover_at:
-                self._rediscover_at = now + 10.0
+            gap = (self.REREAD_PRESS_S if pressed
+                   else self.REREAD_ABSENT_S if self._absent else self.REREAD_BUSY_S)
+            if now - self._reread_at >= gap:
+                self._reread_at = now
                 self.rediscover()
                 more = self._try_open()
                 if more is None:
@@ -499,7 +512,7 @@ class Recorder:
                 # silence anyway, so opening afresh loses nothing.
                 self._close()
             had_stream = self._stream is not None
-            self._open()
+            self._open(pressed=True)
             if not had_stream:
                 with self._lock:
                     self._chunks, self._held = [], 0

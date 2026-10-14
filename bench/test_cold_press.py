@@ -58,7 +58,7 @@ def main() -> int:
     r = K.Rig()
     r.rec._close("handed to a program in yield_to")
     # The press opens it again, from cold: an empty ring.
-    r.rec._open = lambda: setattr(r.rec, "_stream", K.FakeStream())
+    r.rec._open = lambda **kw: setattr(r.rec, "_stream", K.FakeStream())
     r.d.on_down()
     check(r.rec.pending_preroll_s < 0.05, "a stream opened on the press has no pre-roll",
           f"{r.rec.pending_preroll_s:.2f}")
