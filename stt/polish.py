@@ -989,6 +989,21 @@ DOING = frozenset({
     "посчитаю", "смотрю", "смотрим", "разбираюсь", "разбираемся",
 })
 
+# A task put as an infinitive: "Выбрать одну из трёх полок, где места больше",
+# "Посмотреть, когда придёт оплата". The question word after the comma opens
+# the object of the task, as after DOING. Replayed over the corrector-added
+# marks from 16.08 to 14.10.2026: four such, three wrong and one that could be
+# read either way. Without a comma an infinitive question stays one
+# ("Открыть окно?", "Куда отнести коробку?").
+INFINITIVE_RE = re.compile(r"[аяеиуыо]ть(?:ся)?$")
+NOT_INFINITIVE = frozenset({"опять", "пять", "память", "мать", "печать", "кровать", "благодать"})
+
+
+def _infinitive_head(said_before: list[str]) -> bool:
+    """The first word after the fillers is an infinitive."""
+    head = next((w for w in said_before if w not in FILLERS), "")
+    return bool(INFINITIVE_RE.search(head)) and head not in NOT_INFINITIVE
+
 
 def corrector_may_add(sentence: str) -> bool:
     """May the corrector put a mark the recognizer never heard on this sentence.
@@ -1033,6 +1048,8 @@ def corrector_may_add(sentence: str) -> bool:
         w in DOING and said_before[k - 1:k] != ["не"]
         for k, w in enumerate(said_before)
     ):
+        return False
+    if "," in prefix and _infinitive_head(said_before):
         return False
     return not (
         endings.starts_with_command(sentence)

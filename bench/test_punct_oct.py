@@ -43,6 +43,8 @@ KEEP = [
     ("Что у тебя с настройкой?", "'что' at the head"),
     ("Не проверено пока, где лежит архив?", "a complaint with 'не', then a real question"),
     ("Ты смотрел, сколько у нас осталось места?", "asking the listener what he did is a question"),
+    ("Куда отнести эту коробку?", "an infinitive question with no comma before the question word"),
+    ("Ну где взять ещё одну коробку?", "the same after a filler"),
 ]
 BLOCK = [
     ("Он спросил, где лежит файл?", "somebody else's question passed on"),
@@ -62,6 +64,8 @@ BLOCK = [
     ("Я ищу, кто продал этот диван?", "what the speaker is doing: 'I am looking for who'"),
     ("Мы просто оцениваем, будет ли от этого толк?", "the same with 'ли'"),
     ("И посчитано, сколько стоит одна доставка?", "a task to be done, not a question"),
+    ("Выбрать одну из трёх полок, где места больше?", "a task put as an infinitive"),
+    ("Ну посмотреть, когда придёт оплата?", "the same after a filler"),
 ]
 print("-- may the corrector add a mark")
 for sentence, why in KEEP:
