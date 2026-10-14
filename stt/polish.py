@@ -493,7 +493,7 @@ def constrain(
     # Before the question marks are counted: a mark that is about to be given
     # back to the ellipsis must not compete with the heard ones for a place.
     text = keep_cut_off(raw, text)
-    text = balance_quotes(raw, text)
+    text = quote_capital(balance_quotes(raw, text))
     text = keep_da_net(raw, text)
     text = keep_aside_commas(raw, text)
     return DOUBLE_DOT_RE.sub(".", no_false_question(raw, text))
@@ -559,6 +559,20 @@ def balance_quotes(raw: str, text: str) -> str:
     text = re.sub(r"[\"«»“”„]", "", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return re.sub(r" +([,.!?…:;])", r"\1", text).strip()
+
+
+QUOTE_AFTER_COLON_RE = re.compile(r"(:\s*[«„\"“])([а-яё])")
+
+
+def quote_capital(text: str) -> str:
+    """Words quoted after a colon start with a capital letter.
+
+    That is direct speech ("он говорит: «Приходите завтра»"), and the
+    corrector, which puts in these quotes itself, left the first letter small
+    in 9 of the 38 quotes it opened after a colon over 30 days (to 14.10.2026).
+    Only a small Russian letter: a Latin term may be lowercase on purpose.
+    """
+    return QUOTE_AFTER_COLON_RE.sub(lambda m: m.group(1) + m.group(2).upper(), text)
 
 
 # A word that carries its own dot ("т.д.", "2.") followed by a question mark

@@ -235,7 +235,7 @@ QUOTES = [
      "Мне нравится там, good morning, have a nice day — это окей.",
      "the opening quote went with a rolled-back word: all the added quotes go"),
     ("Он сказал всё будет нормально.", "Он сказал: «всё будет нормально».",
-     "Он сказал: «всё будет нормально».", "whole quotes stay"),
+     "Он сказал: «Всё будет нормально».", "whole quotes stay (direct speech gets its capital)"),
     ("Он сказал «готово» и ушёл.", "Он сказал «готово и ушёл.",
      "Он сказал «готово и ушёл.", "quotes the take came with are not touched"),
 ]
