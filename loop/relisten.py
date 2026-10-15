@@ -9,6 +9,8 @@ really said that way or the live read got them wrong.
         time (hint, penalty on repeated words, speech filter, timestamps), to
         find the setting that changes the text. Without [model], the model the
         app gives a take of this length (short_model up to short_seconds).
+        A quiet take is pulled up first, as the app does (audio.normalize),
+        and read once more as saved.
 
 The CPU read is not the live read: the live one runs on the video card in
 float16, so the two can differ by a word on their own. A word that every read
@@ -23,7 +25,7 @@ import numpy as np
 APP = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP))
 from faster_whisper import WhisperModel  # noqa: E402
-from stt import config as cfg_mod, termstats  # noqa: E402
+from stt import audio as audio_mod, config as cfg_mod, termstats  # noqa: E402
 from stt.asr import LOOP_PENALTY, Asr, build_prompt  # noqa: E402
 from stt.fixes import Fixes  # noqa: E402
 
@@ -64,11 +66,19 @@ def variants(audio: np.ndarray, cfg: dict, name: str) -> None:
             without_timestamps=not ts)
         print(f"{label:15s}| " + " ".join(s.text.strip() for s in segs))
 
+    # The app reads normalize(data) but saves data: a quiet take was pulled up
+    # before the live read and is quiet again in the file. Every row reads it
+    # the way the app did; one more row shows the sound as it was saved.
+    saved = audio
+    audio = audio_mod.normalize(saved)
     run("live")
     run("no hint", prompt=None)
     run("penalty flip", rep=LOOP_PENALTY if live_rep < LOOP_PENALTY else 1.0)
     run("no vad", vad=False)
     run("timestamps flip", ts=not long_take, every=False)
+    if audio is not saved:
+        audio = saved
+        run("not boosted")
 
 
 def live_model(audio: np.ndarray, cfg: dict) -> str:
