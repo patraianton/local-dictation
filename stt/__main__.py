@@ -1468,9 +1468,9 @@ class Dictation:
                     f" (dictation continues; the text comes out raw)")
                 self.hud.set("warn", "corrector off", hide_after=3.0)
             final, _ = self.fixes.apply(polished)
-            from .polish import open_with_capital
+            from .polish import open_with_capital, polite_commas
 
-            final = open_with_capital(final)
+            final = polite_commas(open_with_capital(final))
             sound_q = self.ask_the_sound(data, raw, final)
             if sound_q is not None:
                 final = sound_q

@@ -515,6 +515,32 @@ def open_with_capital(text: str) -> str:
     return FIRST_SMALL_CYRILLIC_RE.sub(lambda m: m.group(1) + m.group(2).upper(), text, count=1)
 
 
+POLITE_LEFT_RE = re.compile(r"(?<!\w)(\w+)[ \t]+(пожалуйста)(?!\w)", re.IGNORECASE)
+POLITE_RIGHT_RE = re.compile(r"(?<!\w)(пожалуйста)[ \t]+(?=\w)", re.IGNORECASE)
+# A conjunction or particle in front goes with it, no comma between:
+# "и пожалуйста, отправь", "ну пожалуйста", "да пожалуйста".
+POLITE_NO_LEFT = {"и", "а", "но", "да", "ну", "или", "либо", "же", "не"}
+
+
+def polite_commas(text: str) -> str:
+    """Sets off «пожалуйста» with commas where the text left it bare.
+
+    The recognizer writes the commas most of the time, and the corrector puts
+    them in when it does not. Not always: of 472 takes with the word from
+    August to 16.10.2026, 35 were pasted without a comma on one side or both
+    (made-up examples): "открой пожалуйста почту", "сделай, пожалуйста отчёт",
+    "убери это пожалуйста." — every one of them a polite word inside a request.
+    A dash, a colon or the end of a sentence next to it is left as it is.
+    """
+    def left(m: re.Match) -> str:
+        if m.group(1).lower() in POLITE_NO_LEFT:
+            return m.group(0)
+        return f"{m.group(1)}, {m.group(2)}"
+
+    text = POLITE_LEFT_RE.sub(left, text)
+    return POLITE_RIGHT_RE.sub(r"\1, ", text)
+
+
 QUOTE_CHARS = "\"«»“”„"
 
 
