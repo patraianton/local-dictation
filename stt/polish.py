@@ -607,7 +607,13 @@ def quote_capital(text: str) -> str:
 DOUBLE_DOT_RE = re.compile(r"(?<!\.)\.\.(?!\.)")
 
 
-DA_NET_RE = re.compile(r"\b(да) (нет|не|ни)\b", re.IGNORECASE | re.UNICODE)
+# The negative words "да" leans on: "да никто не знает", "да ничего страшного".
+DA_NI_WORDS = ("никто", "никого", "никому", "никем", "ничего", "ничему", "ничем",
+               "никогда", "нигде", "никуда", "ниоткуда", "никак", "нисколько",
+               "никакой", "никакая", "никакое", "никакие", "никакого", "никаких",
+               "нифига", "нихрена", "нихуя")
+DA_NET_RE = re.compile(r"\b(да) (нет|не|ни|" + "|".join(DA_NI_WORDS) + r")\b",
+                       re.IGNORECASE | re.UNICODE)
 
 
 def keep_da_net(raw: str, text: str) -> str:
@@ -617,10 +623,12 @@ def keep_da_net(raw: str, text: str) -> str:
     then a no. The corrector split it in 8 of the 12 takes that had it
     (August-October 2026). The same with "да не надо", "да не знаю": a
     brush-off, not a yes ("Да, не надо" reads "yes, don't") — split in 12 of
-    the 18 takes that had it, every one of them wrongly (13.10.2026). Only as
-    many as the recognizer wrote without a comma, each word counted apart.
+    the 18 takes that had it, every one of them wrongly (13.10.2026). And with
+    "да никто", "да ничего" (made-up examples): split in both takes that had one, by
+    16.10.2026. Only as many as the recognizer wrote without a comma, each
+    word counted apart.
     """
-    for word in ("нет", "не", "ни"):
+    for word in ("нет", "не", "ни") + DA_NI_WORDS:
         left = sum(1 for m in DA_NET_RE.finditer(raw or "") if m.group(2).lower() == word)
         if left:
             text = re.sub(rf"\b(да), ({word})\b", r"\1 \2", text, count=left,
