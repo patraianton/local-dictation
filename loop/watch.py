@@ -79,6 +79,8 @@ STATE = APP / "state" / "loop-watch.state"
 # The last dropped take printed, kept apart: a drop is printed at once, before
 # the takes still held for the pause, so it cannot share STATE with them.
 DSTATE = APP / "state" / "loop-watch.dropped"
+# Touched on every poll: when a watch last looked, whatever it printed.
+ALIVE = APP / "state" / "loop-watch.alive"
 
 
 def resume_point() -> str:
@@ -86,13 +88,21 @@ def resume_point() -> str:
 
     The watch is often run under a supervisor that stops it every 30 minutes
     and starts it again; without this, takes made in between were never
-    printed or checked."""
+    printed or checked. "In the last hour" is when that watch last looked,
+    not how old its last printed take is: after a quiet evening the last
+    printed take was three hours old, the new watch started from "now", and
+    the two takes said in the minute between the old watch stopping and the
+    new one starting were never shown (16.10.2026)."""
     now = datetime.now().strftime("%Y-%m-%d_%H%M%S-999")
     try:
         last = STATE.read_text(encoding="utf-8").strip()
     except OSError:
         return now
-    return last if last and age(last) < 3600 else now
+    try:
+        looked = time.time() - ALIVE.stat().st_mtime < 3600
+    except OSError:
+        looked = False
+    return last if last and (looked or age(last) < 3600) else now
 
 
 def unchecked(since: str) -> dict:
@@ -159,6 +169,7 @@ def main() -> None:
                     for line in data.splitlines():
                         if ALARM.search(line) and "pasted via" not in line:
                             print(f"ALARM {line}", flush=True)
+            ALIVE.touch()
         except Exception as exc:  # one bad read must not stop the watch
             print(f"WATCH-ERROR {type(exc).__name__}: {exc}", flush=True)
         time.sleep(10)
