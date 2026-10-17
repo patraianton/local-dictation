@@ -541,6 +541,32 @@ def polite_commas(text: str) -> str:
     return POLITE_RIGHT_RE.sub(r"\1, ", text)
 
 
+# «Все» opening a sentence before a comma or its end, and «и все» closing one.
+VSE_OPEN_RE = re.compile(r"(^|[.!?…][\"»)]*\s+)([Вв])се(?=\s*,\s*(\w+)|\s*[.!?…]|\s*$)")
+VSE_CLOSE_RE = re.compile(r"(?<!\w)([Ии]) ([Вв])се(?=\s*[.!?…]|\s*$)")
+# «Все, кто пришёл…» is the other word.
+VSE_WHO = frozenset({"кто", "кого", "кому", "кем", "ком",
+                     "которые", "которых", "которым", "которыми"})
+
+
+def vsyo(text: str) -> str:
+    """«Всё» where the text left «все» in the two places it is never that word.
+
+    «все» and «всё» are both words, so the dictionary may not swap them and the
+    corrector picks one by reading the sentence. In two places it is always
+    «всё», and the corrector left «все» there: a sentence opening with «Все,»
+    (made-up: "Все, свободен", "Все, что осталось…": 41 of 56 takes over
+    13.08-17.10.2026) and «и все» closing one ("оставь как есть и все": 10 of 42).
+    """
+    def opening(m: re.Match) -> str:
+        if m.group(3) and m.group(3).lower() in VSE_WHO:
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)}сё"
+
+    text = VSE_OPEN_RE.sub(opening, text)
+    return VSE_CLOSE_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}сё", text)
+
+
 QUOTE_CHARS = "\"«»“”„"
 
 
