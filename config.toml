@@ -359,6 +359,9 @@ open_on_start = false
 enabled = true
 size = 16
 margin = 28
+# Which screen the dot sits on (bottom-right corner): "primary", "left"
+# (the leftmost screen) or "right".
+screen = "left"
 
 [handsfree]
 # One press starts recording, the next stops it — nothing to hold.

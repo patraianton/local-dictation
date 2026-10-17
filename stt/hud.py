@@ -5,6 +5,7 @@ The window deliberately never takes focus — otherwise the paste would land in
 the wrong place.
 """
 import ctypes
+from ctypes import wintypes
 import queue
 import time
 import tkinter as tk
@@ -25,6 +26,56 @@ GWL_EXSTYLE = -20
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_TRANSPARENT = 0x00000020
+MONITORINFOF_PRIMARY = 1
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+def work_areas() -> list[tuple[bool, tuple[int, int, int, int]]]:
+    """Every screen as (is the main one, (left, top, right, bottom) without the taskbar).
+
+    In this process's own coordinates, the ones Tk places windows in. Empty if
+    Windows would not say.
+    """
+    found = []
+    try:
+        user32 = ctypes.windll.user32
+
+        def one(hmon, _hdc, _rect, _data):
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(info)
+            if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+                r = info.rcWork
+                found.append((bool(info.dwFlags & MONITORINFOF_PRIMARY),
+                              (r.left, r.top, r.right, r.bottom)))
+            return 1
+
+        proc = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HMONITOR, wintypes.HDC,
+                                  ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+        user32.EnumDisplayMonitors(None, None, proc(one), 0)
+    except Exception:
+        return []
+    return found
+
+
+def pick_screen(areas, which: str):
+    """The work area of the screen the dot goes on, or None to use the old way.
+
+    which: "primary" (the main screen, the default), "left" (the leftmost
+    screen) or "right" (the rightmost). Asked for on 17.10.2026: the main
+    screen is right of the one he works on, and the dot in its far right corner
+    went unseen.
+    """
+    if not areas:
+        return None
+    if which == "left":
+        return min(areas, key=lambda a: a[1][0])[1]
+    if which == "right":
+        return max(areas, key=lambda a: a[1][2])[1]
+    return next((r for main, r in areas if main), areas[0][1])
 
 
 class Hud:
@@ -33,6 +84,7 @@ class Hud:
         self.enabled = bool(h.get("enabled", True))
         self.size = int(h.get("size", 16))
         self.margin = int(h.get("margin", 28))
+        self.screen = str(h.get("screen", "primary")).lower()
         self.q: queue.Queue = queue.Queue()
         self.root = None
         self.win = None
@@ -59,9 +111,16 @@ class Hud:
         except tk.TclError:
             pass
         w, hgt = 220, max(self.size + 10, 26)
-        sw = win.winfo_screenwidth()
-        sh = win.winfo_screenheight()
-        win.geometry(f"{w}x{hgt}+{sw - w - self.margin}+{sh - hgt - self.margin - 40}")
+        area = pick_screen(work_areas(), self.screen)
+        if area:
+            x, y = area[2] - w - self.margin, area[3] - hgt - self.margin
+        else:
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            x, y = sw - w - self.margin, sh - hgt - self.margin - 40
+        # "+-3700" is Tk for x = -3700: a screen left of the main one has
+        # negative coordinates, and a bare "-3700" would count from the right.
+        win.geometry(f"{w}x{hgt}+{x}+{y}")
 
         self.canvas = tk.Canvas(
             win, width=w, height=hgt, bg=TRANSPARENT, highlightthickness=0, bd=0
