@@ -230,6 +230,10 @@ class Dictation:
             named=bool(mic_name.strip()),
         )
         self.recorder.log = log
+        # The microphone died under a take and was opened again: say so on the
+        # dot, the start of the phrase may be missing (see _revive_in_take).
+        self.recorder.on_stall = lambda gap: self.hud.set(
+            "lock" if self.locked else "rec", "mic came back")
         self.gain = micgain_mod.MicGain(
             self.cfg["mic"].get("name", ""), self.cfg,
             cfg_mod.MICGAIN_STATE_PATH, log,

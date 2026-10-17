@@ -27,7 +27,7 @@ APP = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP))
 from stt import sentcheck  # noqa: E402
 MAX_TAKE_S = 300  # the app's max_seconds
-ALARM = re.compile(r"corrector OFF|no chat model|Traceback|FAILED|GPU|safety net|did not open|Error", re.I)
+ALARM = re.compile(r"corrector OFF|no chat model|Traceback|FAILED|GPU|safety net|did not open|Error|stopped delivering", re.I)
 
 
 def rows(folder: Path, since: str) -> list[dict]:

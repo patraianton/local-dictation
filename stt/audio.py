@@ -192,6 +192,9 @@ class Recorder:
         # moment Anton switches to another window — that window may well be
         # the call he is about to join.
         self.should_hold = None
+        # Called with the seconds lost when a take's stream died and was
+        # replaced under it (see _revive_in_take). From the keeper thread.
+        self.on_stall = None
         self.recipe = None  # what worked; reuse it directly next time
         self.last_error = ""
         self.last_preroll_s = 0.0     # of the take just handed over
@@ -444,6 +447,7 @@ class Recorder:
         def loop() -> None:
             while not self._closing.wait(0.25):
                 if self._armed:
+                    self._revive_in_take()
                     continue
                 now = time.perf_counter()
                 hot = now < self._hot_until
@@ -489,6 +493,63 @@ class Recorder:
 
         self._keeper = threading.Thread(target=loop, daemon=True)
         self._keeper.start()
+
+    # How long a take may get no sound at all before its stream is replaced.
+    STALL_IN_TAKE_S = 0.6
+
+    def _revive_in_take(self) -> None:
+        """The stream died while a take was being recorded: put a new one under it.
+
+        17.10.2026, twice in four minutes: the microphone stopped delivering
+        right at the key press (the half second before it was loud speech),
+        Anton spoke into nothing for the whole press, and only after the key
+        went up did this thread notice the dead stream — it did not look while
+        a take was being recorded. Both phrases were lost; a new stream opened
+        at once each time. Now the take keeps what it has, a new stream is put
+        under it within a second, and the rest of the phrase goes in.
+        """
+        now = time.perf_counter()
+        if now < self._retry_at:
+            return
+        with _pa_lock:
+            if not self._armed:
+                return
+            if self._stream is not None and now - self._last_block_at <= self.STALL_IN_TAKE_S:
+                return
+            gap = now - self._last_block_at
+            stream, self._stream = self._stream, None
+            if stream is not None:
+                self.closed_why, self.closed_at = "it stopped delivering sound during a take", now
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
+            sr = self._open_sr
+            try:
+                self._open(pressed=True)
+            except Exception as exc:
+                self._retry_at = time.perf_counter() + 0.5
+                if stream is not None:
+                    self.log("the microphone stopped delivering sound during a take "
+                             f"and does not open again yet: {str(exc)[:80]}")
+                return
+            if self._open_sr != sr:
+                # Another rate on the new stream: bring what is held to it, so
+                # the take is one piece of sound.
+                with self._lock:
+                    if self._chunks:
+                        old = np.concatenate(self._chunks)
+                        new = _resample(old, sr, self._open_sr)
+                        self._take_from = int(self._take_from * len(new) / max(1, len(old)))
+                        self._chunks, self._held = [new], len(new)
+        self.log(f"the microphone stopped delivering sound during a take — "
+                 f"opened it again after {gap:.1f} s, the take goes on")
+        if self.on_stall is not None:
+            try:
+                self.on_stall(gap)
+            except Exception:
+                pass
 
     def release(self) -> None:
         """Gives the microphone back to other programs right now."""
@@ -654,7 +715,9 @@ class Recorder:
         between "the key was released" and "the thread that stops has started".
         """
         with self._lock:
-            if self._stream is None or not self._armed:
+            # Armed is enough: a take whose stream died and has not been
+            # replaced yet (see _revive_in_take) still has its sound to give.
+            if not self._armed:
                 return None
             req = threading.Event()
             self._stop_req = req
@@ -703,16 +766,17 @@ class Recorder:
         req = request if request is not None else self.begin_stop()
         if req is not None and req.is_set():
             return None                 # taken back before we even started
-        if req is None or self._stream is None or not self._armed:
+        if req is None or not self._armed:
             self._armed = False
             self.last_preroll_s = 0.0
             self.last_xruns = 0
             self.last_xrun_kinds = []
             return np.zeros(0, dtype=np.float32)
-        try:
-            self._wait_tail(tail_s, quiet_ms, quiet_rel, req)
-        except Exception:
-            pass
+        if self._stream is not None:
+            try:
+                self._wait_tail(tail_s, quiet_ms, quiet_rel, req)
+            except Exception:
+                pass
         with self._lock:
             # The one decision. resume() sets the request under this same lock,
             # so either it is already set here (the take stays armed, every
