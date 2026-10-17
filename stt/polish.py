@@ -1198,6 +1198,20 @@ def allowed_words(terms: list[str], fixes=None) -> set[str]:
     return out
 
 
+# Extra seconds the corrector gets per character of the take, on top of
+# [polish] timeout_s. Its answer is as long as the take: a 30-second take was
+# corrected in 0.7 s (median), a 100-second one in 1.8 s and up to 4 s on a
+# busy video card. With one fixed 4 s, 3 of the 16 takes over 90 s (02-17.10.2026)
+# ran out of time, came out uncorrected, and LM Studio, still writing the
+# answer nobody waited for, made the next short take run out of time as well.
+TIMEOUT_PER_CHAR_S = 1 / 400
+
+
+def corrector_timeout(base: float, raw: str) -> float:
+    """How long to wait for the corrector's answer to this take."""
+    return base + len(raw) * TIMEOUT_PER_CHAR_S
+
+
 class Polisher:
     def __init__(self, cfg: dict, terms: list[str], fixes=None, protected=None):
         p = cfg.get("polish", {})
@@ -1448,7 +1462,8 @@ class Polisher:
                 # stay loaded always (2026-08-20). Nothing we send may unload it.
             }
             r = self._client.post(
-                f"{self.base}/v1/chat/completions", json=body, timeout=self.timeout
+                f"{self.base}/v1/chat/completions", json=body,
+                timeout=corrector_timeout(self.timeout, raw),
             )
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
