@@ -567,6 +567,20 @@ def vsyo(text: str) -> str:
     return VSE_CLOSE_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}сё", text)
 
 
+# A dash written straight between two Russian words, no spaces round it.
+WORD_DASH_RE = re.compile(r"(?<=[А-Яа-яЁё])–(?=[А-Яа-яЁё])")
+
+
+def word_hyphen(text: str) -> str:
+    """«два-три», «год-два»: a hyphen, not the dash the corrector puts there.
+
+    Between digits the dash stays ("2–3"). Over 13.08-18.10.2026 the corrector
+    put an en dash between two Russian words 8 times (made-up: "день–два",
+    "трёх–четырёх", "меньше–больше") and the recognizer never did.
+    """
+    return WORD_DASH_RE.sub("-", text)
+
+
 QUOTE_CHARS = "\"«»“”„"
 
 
