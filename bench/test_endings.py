@@ -24,6 +24,8 @@ CASES = [
     ("Сформирую отчёт по неделе", "Сформируй отчёт по неделе", "the canonical example"),
     ("Либо нагенерирую ещё идей для теплицы", "Либо нагенерируй ещё идей для теплицы",
      "a verb added on 18.10.2026"),
+    ("Расшифрую эту запись для себя", "Расшифруй эту запись для себя",
+     "an order to transcribe, heard as a promise"),
 
     # --- traps: must not be touched ---
     ("Я сделаю это сам", "Я сделаю это сам", "with the pronoun present, it really is about the speaker"),
