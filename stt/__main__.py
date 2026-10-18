@@ -270,6 +270,9 @@ class Dictation:
         self._front_exe = ""
         self._front_since = 0.0
         self._probe_until = 0.0
+        # Which of the reasons below last let the microphone go: the line about
+        # a press with no pre-roll names it.
+        self.yield_kind = ""
         self.recorder.should_hold = self._may_hold_mic
 
         self.asr = None
@@ -875,8 +878,11 @@ class Dictation:
             rec = self.recorder
             ago = time.perf_counter() - rec.closed_at
             front = (paste_mod.foreground_exe() or "").lower() or "unknown"
+            why = rec.closed_why
+            if "yield_to" in why and self.yield_kind:
+                why = f"{why}: {self.yield_kind}"
             log(f"no pre-roll on this press: the microphone was let go {ago:.1f} s "
-                f"before ({rec.closed_why}); in front: {front}")
+                f"before ({why}); in front: {front}")
         except Exception as exc:
             log(f"no pre-roll on this press ({type(exc).__name__}: {exc})")
 
@@ -940,11 +946,13 @@ class Dictation:
                 self._front_exe = now
                 self._front_since = clock
                 self._probe_until = clock + self.yield_probe_s
+                self.yield_kind = f"{now} records"
                 return False
         except Exception:
             # No registry, no answer — fall back to the old behaviour and let
             # the microphone go, because a broken call is worse than a lost
             # syllable.
+            self.yield_kind = "Windows did not say who records"
             return False
         if now != self._front_exe:
             # It has just come to the front: give it the microphone for a
@@ -952,6 +960,7 @@ class Dictation:
             self._front_exe = now
             self._front_since = clock
             self._probe_until = clock + self.yield_probe_s
+            self.yield_kind = f"{now} came to the front"
             return False
         if clock < self._probe_until:
             return False
@@ -969,6 +978,7 @@ class Dictation:
             pass
         if clock - self._probe_until >= every:
             self._probe_until = clock + self.yield_probe_s
+            self.yield_kind = f"{now}'s chance every {every:g} s"
             return False
         return True
 
