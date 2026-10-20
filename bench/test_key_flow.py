@@ -151,7 +151,7 @@ class Rig:
         d.tap_ms, d.max_seconds = tap_ms, 300
         d.tail_s, d.tail_quiet_ms = tail_s, 120
         d.hud, d.ducker = Hud(), Ducker()
-        d.mic_cooldown, d.hot_window = 0.0, ""
+        d.mic_cooldown, d.hot_window, d.yield_kind = 0.0, "", ""
         M.Dictation._init_flow(d)
         self.rec, self.mic = make_recorder()
         d.recorder = self.rec

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from stt.polish import allowed_words, constrain  # noqa: E402
 
 TERMS = ["AcmePass", "GitHub", "Claude Code", "Chrome Extension", "Supabase",
-         "Intercom", "loop", "worktree", "Codex", "outbound"]
+         "Intercom", "loop", "worktree", "Codex", "outbound", "Plan A"]
 ALLOWED = allowed_words(TERMS)
 
 # (what was said, what the corrector returned, what must come out, why)
@@ -254,6 +254,12 @@ CASES = [
         "Почему статьи не залились?",
         "Почему статьи не залились?",
         "a question word is present: the corrector mark is accepted",
+    ),
+    (
+        "Кто закрыл доступ Supabase'а, интересно?",
+        "Кто закрыл доступ Supabase'a, интересно?",
+        "Кто закрыл доступ Supabase'а, интересно?",
+        "a Latin letter that looks the same is not a term: the ending stays Cyrillic",
     ),
 ]
 

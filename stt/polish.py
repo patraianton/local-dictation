@@ -57,6 +57,14 @@ def translit(text: str) -> str:
     return "".join(_TRANSLIT.get(c, c) for c in text.lower())
 
 
+# Latin letters drawn exactly like a Cyrillic one.
+_LOOK_ALIKE = str.maketrans("aceopxyk", "асеорхук")
+
+
+def look_alike(text: str) -> str:
+    return text.lower().translate(_LOOK_ALIKE)
+
+
 def _sound_ratio(said: str, term: str) -> float:
     a = re.sub(r"\W", "", translit(said))
     b = re.sub(r"\W", "", term.lower())
@@ -283,6 +291,11 @@ def constrain(
         # Cyrillic by ear. Otherwise the corrector swaps one glossary term for
         # another ("Mailwing" -> "Mailflow"), which it must never do.
         if not CYRILLIC_RE.search(said):
+            return False
+        # A word that only swaps a Cyrillic letter for the Latin one drawn the
+        # same is no term: "OpenRouter'а" came back as "OpenRouter'a"
+        # (20.10.2026), which reads the same and is no longer found by search.
+        if look_alike(said) == look_alike(" ".join(words)):
             return False
         # Words the speaker genuinely says in their own language are not
         # translated: "сессию" stays "сессию" and never becomes "session".
