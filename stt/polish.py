@@ -560,6 +560,8 @@ VSE_CLOSE_RE = re.compile(r"(?<!\w)([Ии]) ([Вв])се(?=\s*[.!?…]|\s*$)")
 # «Все, кто пришёл…» is the other word.
 VSE_WHO = frozenset({"кто", "кого", "кому", "кем", "ком",
                      "которые", "которых", "которым", "которыми"})
+# «всё» right before the next word, and the word before it ("это всё").
+VSYO_BEFORE_RE = re.compile(r"(?<![\w-])(?:(\w+)(\s+))?([Вв])сё(\s+)([а-яё]+)\b")
 
 
 def vsyo(text: str) -> str:
@@ -577,7 +579,19 @@ def vsyo(text: str) -> str:
         return f"{m.group(1)}{m.group(2)}сё"
 
     text = VSE_OPEN_RE.sub(opening, text)
-    return VSE_CLOSE_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}сё", text)
+    text = VSE_CLOSE_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}сё", text)
+
+    # And the other way: «всё» before a plural is «все» — "должен всё эти
+    # ошибки найти" (made-up). The corrector wrote it in 19 takes over
+    # 14.08-20.10.2026, and all 19 were wrong. After «это» it is «всё»
+    # rightly: "это всё мелкие правки".
+    def before_plural(m: re.Match) -> str:
+        if (m.group(1) or "").lower() in ("это", "то") or not endings.plural_only(m.group(5)):
+            return m.group(0)
+        head = (m.group(1) or "") + (m.group(2) or "")
+        return f"{head}{m.group(3)}се{m.group(4)}{m.group(5)}"
+
+    return VSYO_BEFORE_RE.sub(before_plural, text)
 
 
 # A dash written straight between two Russian words, no spaces round it.

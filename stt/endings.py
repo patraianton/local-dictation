@@ -245,6 +245,32 @@ def yo_known(word: str) -> bool:
         return True
 
 
+# Readings that rule a word out of being the plural «все» goes with: «всё
+# равно», «всё время» (singular), «всё они» (a pronoun), «всё сделал».
+NOT_A_PLURAL = {"ADVB", "PRED", "VERB", "INFN", "ADJS", "COMP", "CONJ", "PRCL",
+                "NPRO", "PREP", "GRND", "PRTS", "INTJ", "NUMR"}
+
+
+@lru_cache(maxsize=4096)
+def plural_only(word: str) -> bool:
+    """A noun or adjective that here can only be a plural subject or object:
+    «эти», «мои», «статьи», «окна» yes; «время», «равно», «они» no."""
+    if _MORPH is None:
+        return False
+    try:
+        parses = _MORPH.parse(word.lower())
+    except Exception:
+        return False
+    plural = False
+    for p in parses:
+        g = set(p.tag.grammemes)
+        if p.tag.POS in NOT_A_PLURAL or ("sing" in g and "nomn" in g):
+            return False
+        if "plur" in g and g & {"nomn", "accs"} and p.tag.POS in {"NOUN", "ADJF", "PRTF"}:
+            plural = True
+    return plural
+
+
 @lru_cache(maxsize=4096)
 def is_imperative(word: str) -> bool:
     """Is this word an imperative.
