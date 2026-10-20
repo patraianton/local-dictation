@@ -73,6 +73,9 @@ STOP_NOTICE_S = 4.0
 BUSY_WAIT_S = 120.0
 # Waiting longer than this is worth a line in the log.
 BUSY_LOG_S = 1.0
+# Time spent on a take outside the recognizer and the corrector (question
+# check, paste, the rest) is about 0.1 s; past this it gets a line in the log.
+SLOW_REST_S = 0.5
 
 # A phrase that ends on one of these was cut off by the speaker, not finished.
 # A question mark glued on after them is wrong whatever the voice sounded like.
@@ -1231,6 +1234,7 @@ class Dictation:
         Returns the new text, or None to leave everything as it was.
         """
         self.last_sound_q = None
+        self.last_sound_q_s = 0.0
         if not self.sound_questions or "?" in final or not final.strip():
             return None
         if final.rstrip().endswith(CUT_OFF_ENDINGS):
@@ -1239,6 +1243,7 @@ class Dictation:
         d = self.asr.question_score(data, raw)
         took = time.perf_counter() - t0
         self.last_sound_q = d
+        self.last_sound_q_s = took
         if d is None or d <= self.sound_threshold:
             return None
         from .polish import flip_question
@@ -1489,14 +1494,17 @@ class Dictation:
             if sound_q is not None:
                 final = sound_q
 
+            t_paste = time.perf_counter()
             paste_text(
                 final,
                 self.cfg["paste"].get("hotkey", "ctrl+v"),
                 float(self.cfg["paste"].get("restore_clipboard_after_s", 1.0)),
             )
             pasted = True
+            t_paste = time.perf_counter() - t_paste
 
             total = time.perf_counter() - t_all
+            t_sound_q = getattr(self, "last_sound_q_s", 0.0)
             promoted = self.learner.observe(pre, polished)
             stamp = datetime.now().strftime("%H%M%S-%f")[:-3]
             wav = self.learner.save_audio(data, final, stamp)
@@ -1526,6 +1534,11 @@ class Dictation:
                     # instead of speech, and what was done about it.
                     "asr_echo": getattr(self.asr, "last_echo", None),
                     "ms_polish": int(t_pol * 1000),
+                    # The two steps that ran slow unseen: a 1.1 s take on
+                    # 20.10.2026 took 1.6 s, 1.3 s of it in neither the
+                    # recognizer nor the corrector.
+                    "ms_sound_q": int(t_sound_q * 1000),
+                    "ms_paste": int(t_paste * 1000),
                     "ms_total": int(total * 1000),
                     # Blocks of sound the driver admitted dropping inside this
                     # take (0 on every take checked on 30.09).
@@ -1541,6 +1554,11 @@ class Dictation:
                 f"(recognized {t_asr:.2f}, corrected {t_pol:.2f}, {note}, "
                 f"pasted via {paste_mod.last_route})")
             log(f"  {final}")
+            rest = total - t_asr - t_pol
+            if rest > SLOW_REST_S:
+                log(f"  {rest:.2f} s went past the recognizer and the corrector "
+                    f"(question check {t_sound_q:.2f}, paste {t_paste:.2f}, "
+                    f"other {rest - t_sound_q - t_paste:.2f})")
             if peak >= 0.99:
                 log(f"  the take clipped (peak {peak:.2f}) — the words under the "
                     f"clipping are lost")
