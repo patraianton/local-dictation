@@ -109,6 +109,12 @@ APPLY_CASES = [
     ),
     (
         [("щас", "сейчас")],
+        "Нашли щас какие-то, Какие-то ошибки, Где-нибудь в Санкт-Петербурге, Нью-Йорк.",
+        "Нашли сейчас какие-то, какие-то ошибки, где-нибудь в Санкт-Петербурге, Нью-Йорк.",
+        "a word with -то or -нибудь after a comma loses the capital; a hyphenated name keeps it",
+    ),
+    (
+        [("щас", "сейчас")],
         "Открой щас, Hermes и Зорбикс.",
         "Открой сейчас, Hermes и Зорбикс.",
         "a Latin term or a word the dictionary does not know is left alone",

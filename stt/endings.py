@@ -576,8 +576,11 @@ PROPER_TAGS = {"Name", "Surn", "Patr", "Geox", "Orgn", "Trad"}
 FIRST_READING_TAGS = {"Abbr", "Init"}
 # A word followed by a dash, a colon or a bracket is a label in a list, not a
 # word of the sentence: "есть А — база, Б — календарь" lost its "Б" (05.10.2026).
+# A hyphen is part of the word and keeps it out ("Нью-Йорк"), except before
+# a particle: "до каких-то, Какие-то сложности" (20.10.2026).
 COMMA_CAPITAL_RE = re.compile(
-    r"(,\s+)([А-ЯЁ][а-яё]*)(?![\w'’-])(?!\s*[—–:)]|\s+-\s)"
+    r"(,\s+)([А-ЯЁ][а-яё]*)((?:-(?:то|нибудь|либо|таки))?)(?![\w'’-])"
+    r"(?!\s*[—–:)]|\s+-\s)"
 )
 
 
@@ -614,7 +617,8 @@ def comma_capital(text: str) -> str:
         return text
     return COMMA_CAPITAL_RE.sub(
         lambda m: m.group(1) + (m.group(2).lower() if ordinary_word(m.group(2))
-                                and not list_letter(m.group(2)) else m.group(2)),
+                                and not list_letter(m.group(2)) else m.group(2))
+        + m.group(3),
         text,
     )
 
