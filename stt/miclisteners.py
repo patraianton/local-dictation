@@ -180,6 +180,15 @@ def recorded_within(seconds: float) -> set:
     return live
 
 
+# Our own recorder runs under the Python interpreter; it is not "somebody else".
+OWN_NAMES = frozenset({"python", "python.exe", "pythonw", "pythonw.exe"})
+
+
+def others_recorded_within(seconds: float) -> set:
+    """Like recorded_within, without dictation's own interpreter."""
+    return {n for n in recorded_within(seconds) if n not in OWN_NAMES}
+
+
 def is_recording(exe: str, within_s: float = 0.0) -> bool:
     """Is this program (e.g. "zoom.exe") recording now, or within `within_s`?"""
     if not exe:

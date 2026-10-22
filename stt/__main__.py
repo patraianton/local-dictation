@@ -1253,6 +1253,15 @@ class Dictation:
             f"{self.sound_threshold:+.1f}, {took*1000:.0f} ms) — mark put back")
         return new_text
 
+    def _call_during(self, secs: float) -> str:
+        """Another program that used the microphone during the last `secs`, or ""."""
+        try:
+            others = listeners_mod.others_recorded_within(secs + 30.0)
+        except Exception:
+            return ""
+        names = sorted((n.removesuffix(".exe") for n in others), key=len)
+        return names[0] if names else ""
+
     # ---------- one take at a time, in the order they were spoken ----------
     def _turn_take(self) -> int:
         """Draws the next number in the queue for the recognizer."""
@@ -1494,13 +1503,23 @@ class Dictation:
             if sound_q is not None:
                 final = sound_q
 
+            # A take nobody stopped that ran through a call: five minutes of one
+            # side of it were pasted into the window in front (about ten times
+            # 24.08-22.10.2026). Anton, 22.10: keep such text on the board only.
+            call = self._call_during(secs) if secs >= self.max_seconds - 1 else ""
             t_paste = time.perf_counter()
-            paste_text(
-                final,
-                self.cfg["paste"].get("hotkey", "ctrl+v"),
-                float(self.cfg["paste"].get("restore_clipboard_after_s", 1.0)),
-            )
-            pasted = True
+            if call:
+                self.hud.set("warn", "call recorded — not pasted", hide_after=8.0)
+                log(f"a {secs:.0f} s take ran into the maximum length while "
+                    f"{call} was using the microphone — a call, not dictation: "
+                    f"not pasted, the text is on the board")
+            else:
+                paste_text(
+                    final,
+                    self.cfg["paste"].get("hotkey", "ctrl+v"),
+                    float(self.cfg["paste"].get("restore_clipboard_after_s", 1.0)),
+                )
+                pasted = True
             t_paste = time.perf_counter() - t_paste
 
             total = time.perf_counter() - t_all
@@ -1540,6 +1559,7 @@ class Dictation:
                     "ms_sound_q": int(t_sound_q * 1000),
                     "ms_paste": int(t_paste * 1000),
                     "ms_total": int(total * 1000),
+                    **({"not_pasted": f"call: {call}"} if call else {}),
                     # Blocks of sound the driver admitted dropping inside this
                     # take (0 on every take checked on 30.09).
                     "xruns": int(xruns),
@@ -1549,10 +1569,11 @@ class Dictation:
                     "wav": wav,
                 }
             )
-            self.hud.set("ok", f"{total:.1f} s", hide_after=1.2)
+            if pasted:
+                self.hud.set("ok", f"{total:.1f} s", hide_after=1.2)
             log(f"{secs:.1f} s of speech -> {total:.2f} s "
                 f"(recognized {t_asr:.2f}, corrected {t_pol:.2f}, {note}, "
-                f"pasted via {paste_mod.last_route})")
+                + (f"pasted via {paste_mod.last_route})" if pasted else "not pasted)"))
             log(f"  {final}")
             rest = total - t_asr - t_pol
             if rest > SLOW_REST_S:
