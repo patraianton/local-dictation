@@ -594,6 +594,19 @@ def vsyo(text: str) -> str:
     return VSYO_BEFORE_RE.sub(before_plural, text)
 
 
+# A case ending after a Latin term, typed in Latin letters drawn like Cyrillic
+# ones: "Vercel'e" (23.10.2026), "OpenRouter'a", "Select'a". English endings
+# ("it's", "don't", "we've") hold other letters and do not match.
+LATIN_ENDING_RE = re.compile(r"(?<=[A-Za-z0-9]['’])([aceopxy]{1,3})\b")
+
+
+def cyrillic_ending(text: str) -> str:
+    """Such an ending, in a Russian take, written in Cyrillic."""
+    if not CYRILLIC_RE.search(text):
+        return text
+    return LATIN_ENDING_RE.sub(lambda m: look_alike(m.group(1)), text)
+
+
 # A dash written straight between two Russian words, no spaces round it.
 WORD_DASH_RE = re.compile(r"(?<=[А-Яа-яЁё])–(?=[А-Яа-яЁё])")
 

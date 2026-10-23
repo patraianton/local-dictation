@@ -1496,9 +1496,11 @@ class Dictation:
                     f" (dictation continues; the text comes out raw)")
                 self.hud.set("warn", "corrector off", hide_after=3.0)
             final, _ = self.fixes.apply(polished)
-            from .polish import open_with_capital, polite_commas, vsyo, word_hyphen
+            from .polish import (cyrillic_ending, open_with_capital, polite_commas,
+                                 vsyo, word_hyphen)
 
-            final = word_hyphen(vsyo(polite_commas(open_with_capital(final))))
+            final = cyrillic_ending(
+                word_hyphen(vsyo(polite_commas(open_with_capital(final)))))
             sound_q = self.ask_the_sound(data, raw, final)
             if sound_q is not None:
                 final = sound_q
