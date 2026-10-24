@@ -140,6 +140,27 @@ def herdr_focused_pane() -> tuple:
     return "", ""
 
 
+def herdr_focused_session() -> str:
+    """Номер сессии Claude в панели, что в фокусе у herdr, или пустая строка.
+
+    По нему находится разговор, в который сейчас диктуют (stt/context.py).
+    """
+    raw = _herdr_run(["pane", "list"])
+    if not raw:
+        return ""
+    try:
+        panes = json.loads(raw)["result"]["panes"]
+    except Exception:
+        return ""
+    for pane in panes:
+        if pane.get("focused"):
+            session = pane.get("agent_session") or {}
+            if pane.get("agent") == "claude" and session.get("kind") == "id":
+                return str(session.get("value") or "")
+            return ""
+    return ""
+
+
 def _herdr_paste(text: str) -> str:
     """Вставка через саму herdr. Возвращает id панели или пустую строку."""
     pane, agent = herdr_focused_pane()

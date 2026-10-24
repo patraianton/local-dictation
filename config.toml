@@ -219,6 +219,14 @@ prompt_terms = 45
 # "list"     — terms only. More accurate on average, breaks orders more often.
 # "sample"   — a natural sentence containing the terms.
 prompt_style = "commands"
+# The terms of the conversation the take goes into, first in the hint: when the
+# window in front is Claude in herdr, its session's recent messages are read
+# and their terms (glossary ones, then names and acronyms in Latin letters that
+# turn up twice or more) take up to context_terms places after the pinned
+# names. 23.10.2026: «ICP» came out as «ACP» and «IBM» all evening — it was in
+# the glossary but not among the 45. See stt/context.py.
+context_hint = false
+context_terms = 15
 
 [polish]
 # Tidying the text with a second model through LM Studio (OpenAI-compatible API).

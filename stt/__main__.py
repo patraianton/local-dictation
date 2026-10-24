@@ -246,6 +246,10 @@ class Dictation:
         self.sound_questions = bool(pol_cfg.get("sound_questions", True))
         self.sound_threshold = float(pol_cfg.get("sound_threshold", -1.0))
         self.last_sound_q = None
+        # The hint from the conversation the take goes into — see take_prompt.
+        self.context_hint = bool(self.cfg.get("asr", {}).get("context_hint", False))
+        self.context = None   # built once the recognizer (its tokenizer) is up
+        self.last_context = None
         self.mic_cooldown = 0.0
         # Which window the last take went into. Kept for the paste path only.
         self.hot_window = ""
@@ -353,6 +357,14 @@ class Dictation:
         self.asr = Asr(self.cfg, self.hint_terms)
         took = self.asr.load()
         log(f"recognizer {self.asr.model_name} on {self.asr.device}: {took:.1f} s")
+        try:
+            from .context import Context, common_by
+            self.context = Context(self.terms, int(self.cfg["asr"].get("context_terms", 15)),
+                                   common=common_by(self.asr.model.hf_tokenizer))
+        except Exception as exc:
+            log(f"no context hint ({type(exc).__name__}: {exc})")
+        if self.context_hint and self.context is not None:
+            log("hint: the terms of the Claude window in front go first (context_hint)")
         if self.asr.short is not None:
             log(f"short takes (up to {self.asr.short_seconds:.0f} s) go to "
                 f"{self.asr.short_model_name} — it hears them better (see short_seconds in config.toml)")
@@ -1176,6 +1188,48 @@ class Dictation:
                 self.hud.set("warn", text, hide_after=seconds)
 
     # ---------- processing ----------
+    def take_prompt(self) -> str | None:
+        """The hint for this take, with the terms of the conversation it goes into.
+
+        Only for a Claude window in herdr, and only with [asr] context_hint on;
+        anything else, and anything that fails, gives None: the usual hint.
+        """
+        self.last_context = None
+        if not getattr(self, "context_hint", False) or getattr(self, "context", None) is None:
+            return None
+        try:
+            if paste_mod.foreground_exe().lower() != paste_mod.HERDR_EXE_NAME:
+                return None
+            session = paste_mod.herdr_focused_session()
+            terms = self.context.terms(session) if session else []
+            if not terms:
+                return None
+            from .asr import build_prompt
+            from .context import merge
+            a = self.cfg["asr"]
+            size = int(a.get("prompt_terms", 45))
+            self.last_context = terms
+            return build_prompt(merge(terms, self.hint_terms, termstats.KEEP_HEAD, size),
+                                size, a.get("prompt_style", "list"))
+        except Exception as exc:
+            log(f"no context hint for this take ({type(exc).__name__}: {exc})")
+            return None
+
+    def transcribe_take(self, audio: np.ndarray,
+                        speech_s: float | None = None) -> tuple[str, float]:
+        """A take read with its own hint (take_prompt), the usual one put back after."""
+        prompt = self.take_prompt()
+        if not prompt:
+            return self.transcribe_resilient(audio, speech_s)
+        usual = self.asr.prompt
+        self.asr.prompt = prompt
+        try:
+            return self.transcribe_resilient(audio, speech_s)
+        finally:
+            # Unless the terms were reloaded meanwhile: then theirs stays.
+            if prompt and self.asr.prompt == prompt:
+                self.asr.prompt = usual
+
     def transcribe_resilient(self, audio: np.ndarray,
                              speech_s: float | None = None) -> tuple[str, float]:
         """Recognizes; if the GPU fell away, brings the model back up.
@@ -1423,7 +1477,7 @@ class Dictation:
             elif peak < 0.03:
                 self.hud.set("warn", "too quiet", hide_after=1.5)
 
-            raw, t_asr = self.transcribe_resilient(audio_mod.normalize(data), secs)
+            raw, t_asr = self.transcribe_take(audio_mod.normalize(data), secs)
             if not raw.strip():
                 self.hud.set("warn", "nothing recognized", hide_after=1.5)
                 self._drop("nothing_recognized", data, preroll_s, xruns=xruns,
@@ -1559,6 +1613,8 @@ class Dictation:
                     "asr_echo": getattr(self.asr, "last_echo", None),
                     # A made-up end cut off a long take (cut_invented_tail).
                     "asr_tail_cut": getattr(self.asr, "last_tail_cut", None),
+                    # The window's own terms put in front of the hint (take_prompt).
+                    "context_terms": getattr(self, "last_context", None),
                     "ms_polish": int(t_pol * 1000),
                     # The two steps that ran slow unseen: a 1.1 s take on
                     # 20.10.2026 took 1.6 s, 1.3 s of it in neither the
