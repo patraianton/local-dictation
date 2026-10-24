@@ -225,6 +225,12 @@ prompt_style = "commands"
 # turn up twice or more) take up to context_terms places after the pinned
 # names. 23.10.2026: «ICP» came out as «ACP» and «IBM» all evening — it was in
 # the glossary but not among the 45. See stt/context.py.
+# Measured 24.10.2026 on 208 takes of 20-24.10 (Mac, live settings): 51 read
+# differently, three blind judges: window's hint better 8, usual better 10,
+# 33 alike. It finds the new names (Anthropic, Grok, CSDD) but any change of
+# the hint shifts the reading elsewhere too («PostHog» -> «постхога»). Given
+# to the corrector instead, the same terms changed 24 takes of 197, all of it
+# punctuation. Off: no gain either way with today's models.
 context_hint = false
 context_terms = 15
 
