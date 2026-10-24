@@ -1266,6 +1266,21 @@ def corrector_timeout(base: float, raw: str) -> float:
     return base + len(raw) * TIMEOUT_PER_CHAR_S
 
 
+NO_MODEL = "LM Studio has no chat model in memory"
+
+
+def in_hours(span: str, now: float | None = None) -> bool:
+    """Is the clock inside "HH:MM-HH:MM" (local time). An empty span is never."""
+    try:
+        a, b = (time.strptime(x.strip(), "%H:%M") for x in span.split("-"))
+    except ValueError:
+        return False
+    t = time.localtime(now)
+    m = t.tm_hour * 60 + t.tm_min
+    lo, hi = a.tm_hour * 60 + a.tm_min, b.tm_hour * 60 + b.tm_min
+    return lo <= m < hi if lo <= hi else (m >= lo or m < hi)
+
+
 class Polisher:
     def __init__(self, cfg: dict, terms: list[str], fixes=None, protected=None):
         p = cfg.get("polish", {})
@@ -1289,6 +1304,19 @@ class Polisher:
         self._probing = False   # a background re-check is already in flight
         self._loaded_seen = 0.0  # when the list of loaded models was last read
         self.on_status = None   # optional: called when availability changes
+        self.on_note = None     # optional: called with a line for the log
+        # When LM Studio answers with nothing in memory, by day, dictation loads
+        # the small corrector itself (the owner's rule of 04.10.2026: he should
+        # not have to load it by hand). On 24.10.2026 the morning
+        # restore after the robotics night started LM Studio, its `lms load`
+        # hung, and every take from 07:35 to 15:37 came out raw. A STOPPED
+        # LM Studio is left alone: that is the night, or somebody's decision.
+        # A model somebody loaded is never touched: only an empty one is filled.
+        self.autoload = str(p.get("autoload", "") or "")
+        self.autoload_hours = str(p.get("autoload_hours", "07:40-22:50") or "")
+        self.autoload_context = int(p.get("autoload_context", 4096))
+        self.lms_cmd = [os.path.expanduser(str(p.get("lms_path", "~/.lmstudio/bin/lms.exe")))]
+        self._autoload_next = 0.0   # no new attempt before this moment
         # A bearer key for servers that want one (llama-server does, LM Studio
         # does not): either the key itself or a path to a file holding it.
         key = str(p.get("api_key", "") or "").strip()
@@ -1347,8 +1375,72 @@ class Polisher:
             and m.get("id")
         ]
         if not chat:
-            return [], "LM Studio has no chat model in memory"
+            return [], NO_MODEL
         return sorted(chat), ""
+
+    def _note(self, msg: str) -> None:
+        if self.on_note:
+            try:
+                self.on_note(msg)
+            except Exception:
+                pass
+
+    def _lms(self, args: list[str], timeout: float) -> bool:
+        """Runs the LM Studio command line with no window. True if it finished well."""
+        import subprocess
+        try:
+            out = subprocess.run(self.lms_cmd + args, capture_output=True, timeout=timeout,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except subprocess.TimeoutExpired:
+            return False
+        except OSError:
+            return False
+        return out.returncode == 0
+
+    def _restart_lmstudio(self) -> None:
+        """Ends a stuck LM Studio, then starts its server again.
+
+        Only ever called with nothing in memory, so nothing is lost. On
+        24.10.2026 this was the one thing that helped: a fresh LM Studio
+        loaded the model in 6 s, after the old one had hung for eight hours.
+        """
+        import subprocess
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "LM Studio.exe"], capture_output=True,
+                       timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        time.sleep(3.0)
+        self._lms(["server", "start"], timeout=60)
+
+    def autoload_due(self, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        return (bool(self.autoload) and self.enabled and now >= self._autoload_next
+                and in_hours(self.autoload_hours, now))
+
+    def fill_empty(self) -> bool:
+        """Loads the small corrector into an empty LM Studio. True if it is in memory now.
+
+        One try a quarter of an hour at most. A load that hangs (90 s) means
+        LM Studio itself is stuck: it is restarted once and asked again.
+        """
+        self._autoload_next = time.time() + 900
+        load = ["load", self.autoload, "--context-length", str(self.autoload_context), "-y"]
+        for attempt in ("load", "restart"):
+            if attempt == "restart":
+                if self.loaded_models()[0]:
+                    return True   # somebody loaded a model meanwhile
+                self._note("LM Studio did not load the corrector in 90 s — restarting it "
+                           "(nothing was in memory)")
+                self._restart_lmstudio()
+            t0 = time.perf_counter()
+            self._lms(load, timeout=90)
+            chat_ids, why = self.loaded_models()
+            if chat_ids:
+                self._note(f"LM Studio was empty: dictation loaded {self.autoload} "
+                           f"({time.perf_counter() - t0:.0f} s)")
+                return True
+            if why != NO_MODEL:
+                break   # LM Studio went away: not ours to bring up
+        self._note("LM Studio is still empty, the corrector stays off; next try in 15 min")
+        return False
 
     def check(self, force: bool = False) -> bool:
         """Is there a live LM Studio with a model already in memory."""
@@ -1466,7 +1558,10 @@ class Polisher:
 
         def run() -> None:
             try:
-                if self.check(force=True):
+                ok = self.check(force=True)
+                if not ok and self.reason == NO_MODEL and self.autoload_due():
+                    ok = self.fill_empty() and self.check(force=True)
+                if ok:
                     self.warmup()
                     if self.on_status:
                         self.on_status(True, self.model)

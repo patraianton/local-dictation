@@ -236,12 +236,21 @@ api_key_file = ""
 # Lighter and safer: "qwen3-4b-instruct-2507" — 3 GB, same speed, no false
 # marks at all, but it catches fewer questions.
 # Empty = use whatever model is IN MEMORY in LM Studio right now. Dictation
-# never loads a model itself and never keeps one alive: the model in VRAM
-# belongs to whoever put it there. Swap it and dictation follows within twenty
-# seconds; unload everything and dictation simply pastes the raw text.
+# never swaps or unloads a model: the model in VRAM belongs to whoever put it
+# there. Swap it and dictation follows within twenty seconds.
 # A name written here is only a preference — if that model is not in memory,
 # the loaded one wins. To pin one, choose it on the Model tab of the page.
 model = "qwen3-4b-instruct-2507"
+# The one exception: LM Studio is running with NOTHING in memory, inside
+# autoload_hours. Then dictation loads this model itself (lms load, context
+# autoload_context), and if the load hangs for 90 s, restarts the empty
+# LM Studio once and tries again; one try per 15 minutes. A stopped LM Studio
+# is left alone (the night belongs to the robotics runs). 24.10.2026: the
+# morning restore hung and the corrector was off from 07:35 to 15:37.
+# Empty = never load.
+autoload = "qwen3-4b-instruct-2507"
+autoload_hours = "07:40-22:50"
+autoload_context = 4096
 # "light"  — punctuation, capitals and terms only. Your words are untouched.
 # "clean"  — also removes fillers, repeats and slips. Smoother text, but that is
 #            editing your speech.

@@ -370,6 +370,7 @@ class Dictation:
             self.hud.set("ok", "corrector on", hide_after=2.0)
 
         self.polisher.on_status = corrector_back
+        self.polisher.on_note = log
 
         if self.polisher.check():
             warm = self.polisher.warmup()
@@ -377,6 +378,8 @@ class Dictation:
         else:
             log(f"corrector OFF — {self.polisher.reason}")
             log("  (dictation works without it; the text comes out raw)")
+            # An empty LM Studio by day is filled in the background (autoload).
+            self.polisher.probe_soon()
 
         hint_size = int(self.cfg.get("asr", {}).get("prompt_terms", 45))
         log(f"replacements: {len(self.fixes)} pairs, "
