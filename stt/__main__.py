@@ -11,6 +11,7 @@ Usage:
 import io
 import json
 import sys
+import shutil
 import threading
 import time
 import wave
@@ -73,6 +74,13 @@ STOP_NOTICE_S = 4.0
 BUSY_WAIT_S = 120.0
 # Waiting longer than this is worth a line in the log.
 BUSY_LOG_S = 1.0
+# A model reload after the card fell away takes about 5 s; past this it is
+# taken as hung, and dictation restarts itself (restart_self).
+RELOAD_WAIT_S = 20.0
+# How often the card is checked while nobody dictates (_gpu_health).
+GPU_CHECK_S = 300.0
+# Dictation restarts itself at most this often.
+SELF_RESTART_EVERY_S = 600.0
 # Time spent on a take outside the recognizer and the corrector (question
 # check, paste, the rest) is about 0.1 s; past this it gets a line in the log.
 SLOW_REST_S = 0.5
@@ -431,6 +439,7 @@ class Dictation:
 
         self.bind_keys()
         threading.Thread(target=self._keep_warm, daemon=True).start()
+        threading.Thread(target=self._gpu_health, daemon=True).start()
         self.hud.set("ok", "ready", hide_after=1.5)
         log(f"READY. Key {self.key}: hold = speak, tap = hands-free.")
         log(f"Fix the last take: {self.fix_hotkey}. Cancel recording: Esc.")
@@ -478,8 +487,90 @@ class Dictation:
         self.polisher.allowed = allowed_words(self.terms, self.fixes)
         self.polisher.protected = self.mywords
         self.learner.terms = {t.strip().lower() for t in self.terms if t.strip()}
+        if self.context is not None:
+            self.context.glossary = self.terms
+            self.context._cache.clear()
         log(f"terms reloaded: {len(self.terms)}; "
             f"hint: {', '.join(self.hint_terms[:6])}...")
+
+    def restart_self(self, why: str) -> bool:
+        """Starts a fresh dictation in place of this one (start-background.ps1 -Restart).
+
+        Not more than once in SELF_RESTART_EVERY_S, counted across restarts
+        (state/self-restart.txt): a card that is gone for good must not make
+        dictation restart in a circle. Then it stays as it is and says so.
+        """
+        import subprocess
+        mark = cfg_mod.ROOT / "state" / "self-restart.txt"
+        try:
+            last = float(mark.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            last = 0.0
+        if time.time() - last < SELF_RESTART_EVERY_S:
+            log(f"{why} — and a restart was tried {time.time() - last:.0f} s ago; "
+                r"not again. By hand: .\start-background.ps1 -Restart")
+            return False
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        script = cfg_mod.ROOT / "start-background.ps1"
+        if not shell or not script.exists():
+            log(f"{why} — cannot restart myself (no PowerShell or no {script.name})")
+            return False
+        try:
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text(f"{time.time():.0f}", encoding="utf-8")
+        except OSError:
+            pass
+        log(f"{why} — restarting the dictation")
+        self.hud.set("think", "restarting")
+        # Not DETACHED_PROCESS: with it pwsh starts with no console and quits
+        # at once, silently (tried 24.10.2026). Without it, and with no window,
+        # it lives on after this process is stopped and starts the new one.
+        flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                 | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            subprocess.Popen([shell, "-NoProfile", "-File", str(script), "-Restart", "-Now"],
+                             cwd=str(cfg_mod.ROOT), creationflags=flags, close_fds=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            log(f"the restart did not start ({exc})")
+            return False
+        return True
+
+    def _gpu_health(self) -> None:
+        """Checks now and then, while nobody dictates, that the card still works.
+
+        24.10.2026: the video driver reset eight times at 16:54, the model in
+        memory died with it, and that was only found an hour later, on the next
+        take — which was lost, and dictation hung. One second of silence read
+        every GPU_CHECK_S costs a few hundredths of a second of the card.
+        """
+        while True:
+            time.sleep(GPU_CHECK_S)
+            if self.asr is None or self.asr.device == "cpu" or self.recording:
+                continue
+            if not self.busy.acquire(blocking=False):
+                continue
+            box: dict = {}
+
+            def probe() -> None:
+                # Not transcribe(): it cuts silence away before the card is
+                # ever touched. Language detection runs the encoder on it.
+                try:
+                    self.asr.model.detect_language(np.zeros(16000, dtype=np.float32))
+                except Exception as err:
+                    box["error"] = err
+
+            try:
+                worker = threading.Thread(target=probe, daemon=True)
+                worker.start()
+                worker.join(RELOAD_WAIT_S)
+                if worker.is_alive():
+                    self.restart_self(f"the card did not answer a check in {RELOAD_WAIT_S:.0f} s")
+                elif "error" in box and self.asr.looks_like_lost_gpu(box["error"]):
+                    self.restart_self(f"the card failed a check ({type(box['error']).__name__})")
+            finally:
+                self.busy.release()
 
     def _keep_warm(self) -> None:
         """Keeps the corrector resident in VRAM.
@@ -1260,7 +1351,26 @@ class Dictation:
                     exc = again
             log(f"the GPU fell away ({type(exc).__name__}), reloading the model")
             self.hud.set("think", "reloading")
-            where = self.asr.reload()
+            # After the video driver resets, a reload inside this process can
+            # hang for good: on 24.10.2026 at 17:52 it did, and dictation was
+            # dead until restarted by hand. So it gets RELOAD_WAIT_S, and then
+            # the whole process is started afresh.
+            box: dict = {}
+
+            def run_reload() -> None:
+                try:
+                    box["where"] = self.asr.reload()
+                except Exception as err:
+                    box["error"] = err
+
+            worker = threading.Thread(target=run_reload, daemon=True)
+            worker.start()
+            worker.join(RELOAD_WAIT_S)
+            if worker.is_alive() or "error" in box:
+                self.restart_self(f"the model did not come back in {RELOAD_WAIT_S:.0f} s"
+                                  if worker.is_alive() else f"the reload failed ({box['error']})")
+                raise RuntimeError("cuda: restarting the dictation")
+            where = box["where"]
             if where == "cpu":
                 log("failed — switched to the CPU. This will be slower.")
                 log(r"A restart fixes it: .\start-background.ps1 -Restart")

@@ -7,6 +7,7 @@ days writing "FAILED" for every take until it was restarted by hand.
     ..\.venv\Scripts\python.exe test_gpu_recover.py
 """
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -128,6 +129,45 @@ def main() -> None:
         check(False, "не молчит, если починиться не удалось")
     except RuntimeError:
         check(asr.reloads == 1, "не молчит, если починиться не удалось")
+
+    # 7. перезагрузка повисла (24.10.2026, после сброса видеодрайвера) —
+    #    диктовка перезапускается целиком, а не висит
+    import stt.__main__ as M
+    M.RELOAD_WAIT_S = 0.3
+
+    class HangingAsr(FakeAsr):
+        def reload(self):
+            self.reloads += 1
+            time.sleep(5)
+            return "cuda"
+
+    asr = HangingAsr(fails=1, exc=CUDA_ERRORS[0])
+    h = make_holder(asr)
+    h.restart_self = lambda why: h.said.append(why) or True
+    t0 = time.perf_counter()
+    try:
+        h.transcribe_resilient(audio)
+        check(False, "повисшая перезагрузка — перезапуск всей диктовки")
+    except RuntimeError:
+        check(len(h.said) == 1 and time.perf_counter() - t0 < 2,
+              "повисшая перезагрузка — перезапуск всей диктовки, без ожидания",
+              f"{h.said}")
+
+    # 8. перезагрузка упала с ошибкой — тоже перезапуск
+    class BrokenAsr(FakeAsr):
+        def reload(self):
+            self.reloads += 1
+            raise RuntimeError("CUDA driver is in a bad state")
+
+    asr = BrokenAsr(fails=1, exc=CUDA_ERRORS[0])
+    h = make_holder(asr)
+    h.restart_self = lambda why: h.said.append(why) or True
+    try:
+        h.transcribe_resilient(audio)
+        check(False, "упавшая перезагрузка — перезапуск всей диктовки")
+    except RuntimeError:
+        check(len(h.said) == 1 and "failed" in h.said[0],
+              "упавшая перезагрузка — перезапуск всей диктовки", f"{h.said}")
 
     print(f"\n{'all passed' if not bad else str(bad) + ' failed'}")
     sys.exit(1 if bad else 0)
