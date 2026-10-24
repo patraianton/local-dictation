@@ -1557,6 +1557,8 @@ class Dictation:
                     # The hint read back on the last window of a long take
                     # instead of speech, and what was done about it.
                     "asr_echo": getattr(self.asr, "last_echo", None),
+                    # A made-up end cut off a long take (cut_invented_tail).
+                    "asr_tail_cut": getattr(self.asr, "last_tail_cut", None),
                     "ms_polish": int(t_pol * 1000),
                     # The two steps that ran slow unseen: a 1.1 s take on
                     # 20.10.2026 took 1.6 s, 1.3 s of it in neither the

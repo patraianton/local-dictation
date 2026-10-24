@@ -191,6 +191,41 @@ def strip_ghost_tail(text: str) -> str:
     return cut if cut[-1] in SENTENCE_MARKS else cut + "."
 
 
+# A last window of a long take that holds almost no sound — a sliver left after
+# a window that ran the full 30 s — is where the recognizer makes a line up.
+# 24.10.2026: a 30.6 s take whose first window ended at 30.38 s; the 0.8 s left,
+# the end of one word, came out as a video sign-off line said twice over, and
+# the same sliver read on the Mac gave a subtitle credits line. Not a stock
+# line that a list could catch: any line. But a window only hears the sound from where the one before stopped, so
+# a text far longer than that sound can hold was not said. Speech in October
+# 2026 ran at 10 letters a second (median of whole takes), 15.7 at the 99th
+# percentile; 20 a second plus six letters is a word or two more than anybody
+# says in that time.
+TAIL_LETTERS_PER_S = 20.0
+TAIL_SLACK_LETTERS = 6
+TAIL_MAX_S = 2.0
+LETTER_RE = re.compile(r"[^\W_]", re.UNICODE)
+
+
+def cut_invented_tail(segments: list, total_s: float) -> tuple[list, str]:
+    """(the segments without a made-up end, the text that was cut off).
+
+    Only a segment after another one is judged: the sound it may hold runs
+    from where the previous segment ended to the end of the take (trailing
+    silence included, which only makes the check milder).
+    """
+    kept, cut = list(segments), []
+    while len(kept) >= 2 and len(cut) < 2:
+        last, before = kept[-1], kept[-2]
+        sound = max(0.0, total_s - float(before.end))
+        letters = len(LETTER_RE.findall(last.text or ""))
+        if sound >= TAIL_MAX_S or letters <= TAIL_SLACK_LETTERS + TAIL_LETTERS_PER_S * sound:
+            break
+        cut.insert(0, (last.text or "").strip())
+        kept.pop()
+    return kept, " ".join(cut)
+
+
 # A dash in front of the whole take: the recognizer writing it as a line of
 # dialogue ("— Значит, ..."). Five takes from 02.09 to 02.10.2026, each with
 # the dash before the first word. Dictation is never dialogue. polish already
@@ -542,6 +577,7 @@ class Asr:
         self.repetition_penalty = float(a.get("repetition_penalty", 1.0))
         self.last_reread: dict | None = None   # what the last take's second look did
         self.last_echo: dict | None = None     # what the last take's hint check did
+        self.last_tail_cut: str | None = None  # a made-up end cut off the last take
         self.model = None
         self.short = None
         self.last_model = self.model_name   # which model did the last take
@@ -687,6 +723,10 @@ class Asr:
              timestamps: bool = False, every_window: bool = False,
              penalty: float | None = None) -> str:
         segments = self._segments(audio, prompt, model, timestamps, every_window, penalty)
+        if timestamps:
+            segments, cut = cut_invented_tail(segments, len(audio) / 16000.0)
+            if cut:
+                self.last_tail_cut = cut
         return join_pieces(seg.text for seg in segments)
 
     # Marks of a GPU that fell away, leaving the in-memory model dead.
@@ -724,6 +764,7 @@ class Asr:
         t0 = time.perf_counter()
         model, name = self.pick(audio, speech_s)
         self.last_model = name
+        self.last_tail_cut = None
         long = 0 < self.timestamps_after_s < len(audio) / 16000.0
         # Only a long take has a window after the first, so only there does the
         # way the hint is passed matter. Nothing extra is passed otherwise.
