@@ -160,6 +160,10 @@ SOUND_TOKEN_RE = re.compile(
 def just_a_sound(text: str) -> bool:
     """The whole take is a cough, a hum or a laugh and nothing else."""
     plain = PUNCT_RE.sub(" ", (text or "").lower()).split()
+    # One letter drawn out with hyphens, "А-а-а-а-а-а..." (27.10.2026, pasted):
+    # it falls apart into six one-letter words, more than the three below.
+    if len(plain) > 3 and len(set(plain)) == 1 and len(plain[0]) == 1:
+        return bool(SOUND_TOKEN_RE.fullmatch("".join(plain)))
     if not 0 < len(plain) <= 3:
         return False
     # "Ха-ха-ха" falls apart into three "ха", and one "ха" alone is a word.
