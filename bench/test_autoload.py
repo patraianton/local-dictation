@@ -63,6 +63,9 @@ def make(hours: str = "00:00-23:59", load_works: bool = True, hangs_until_restar
 
     def lms(args, timeout):
         calls.append(args[0])
+        if args[0] == "server":
+            state["up"] = True
+            return True
         if args[0] == "load" and load_works and (restarted["done"] or not hangs_until_restart):
             state["loaded"] = [args[1]]
             return True
@@ -118,10 +121,18 @@ def _():
     return not pol.available and calls == [] and pol.reason == NO_MODEL, f"{calls} {pol.reason}"
 
 
-@case("a stopped LM Studio is left alone")
+@case("a stopped LM Studio by day: its server is started and the model loaded (29.10.2026)")
 def _():
     state.update(loaded=[], up=False)
-    pol, calls, _ = make()
+    pol, calls, notes = make()
+    probe(pol)
+    return pol.available and calls == ["server", "load"], f"{calls} {notes} {pol.reason}"
+
+
+@case("a stopped LM Studio at night is left alone")
+def _():
+    state.update(loaded=[], up=False)
+    pol, calls, _ = make(hours="00:00-00:00")
     probe(pol)
     state["up"] = True
     return not pol.available and calls == [], f"{calls} {pol.reason}"

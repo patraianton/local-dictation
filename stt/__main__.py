@@ -586,6 +586,10 @@ class Dictation:
             try:
                 if self.polisher.available or self.polisher.check(force=True):
                     self.polisher.warmup()
+                else:
+                    # LM Studio stopped or empty by day: brought back now, not
+                    # on the first take of the morning (29.10.2026).
+                    self.polisher.probe_soon()
             except Exception:
                 pass
 

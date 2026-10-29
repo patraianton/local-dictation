@@ -1420,8 +1420,17 @@ class Polisher:
 
         One try a quarter of an hour at most. A load that hangs (90 s) means
         LM Studio itself is stuck: it is restarted once and asked again.
+
+        A STOPPED LM Studio inside these hours is started first. The night
+        stops it for the robotics runs, and the morning task that started it
+        again at 07:35 was removed on 25.10.2026: on 29.10 the corrector was
+        off all morning, from 23:00 to 09:10, because nobody brought it back.
         """
         self._autoload_next = time.time() + 900
+        have, why = self.loaded_models()
+        if not have and why != NO_MODEL:
+            self._note("LM Studio is not running — starting its server")
+            self._lms(["server", "start"], timeout=60)
         load = ["load", self.autoload, "--context-length", str(self.autoload_context), "-y"]
         for attempt in ("load", "restart"):
             if attempt == "restart":
@@ -1559,7 +1568,8 @@ class Polisher:
         def run() -> None:
             try:
                 ok = self.check(force=True)
-                if not ok and self.reason == NO_MODEL and self.autoload_due():
+                down = self.reason == NO_MODEL or self.reason.startswith("LM Studio is not answering")
+                if not ok and down and self.autoload_due():
                     ok = self.fill_empty() and self.check(force=True)
                 if ok:
                     self.warmup()

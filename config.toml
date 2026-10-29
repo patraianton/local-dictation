@@ -259,8 +259,9 @@ model = "qwen3-4b-instruct-2507"
 # autoload_hours. Then dictation loads this model itself (lms load, context
 # autoload_context), and if the load hangs for 90 s, restarts the empty
 # LM Studio once and tries again; one try per 15 minutes. A stopped LM Studio
-# is left alone (the night belongs to the robotics runs). 24.10.2026: the
-# morning restore hung and the corrector was off from 07:35 to 15:37.
+# is started too, but only inside these hours (the night belongs to the
+# robotics runs). 24.10.2026: the morning restore hung and the corrector was
+# off from 07:35 to 15:37; 29.10: that morning task was gone, off until 09:10.
 # Empty = never load.
 autoload = "qwen3-4b-instruct-2507"
 autoload_hours = "07:40-22:50"
