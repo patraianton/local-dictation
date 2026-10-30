@@ -202,6 +202,16 @@ reread_early_end = false
 device = "cuda"
 compute_type = "float16"
 language = "ru"
+# A take that sounds English is read as English (30.10.2026): above this share of
+# "en", by the recognizer's own language check. Held at "ru", it now and then
+# translates English speech, a whole sentence pasted as its Russian translation.
+# Measured on the Mac over 20 days of takes: of 600 Russian ones (80 of them full
+# of English terms) none above 0.7, the highest 0.66, on a call; English takes
+# translated live, 5 of 47 that followed an English take, all at 0.86 and up.
+# Read with "en", 19 of 62 English takes changed: 10 translations or nonsense
+# came back as the English said, 8 differ in a word or a mark, one term was
+# lost ("your Claude" -> "your cloud"). 0 = off.
+english_above = 0.7
 # A wider beam. On turbo it costs a hundredth of a second and makes fewer
 # errors: 17.0% against 17.8% on 377 real takes. Set 1 if you want it faster.
 beam_size = 5

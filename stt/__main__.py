@@ -1722,6 +1722,10 @@ class Dictation:
                                 else round(self.last_sound_q, 2)),
                     "ms_asr": int(t_asr * 1000),
                     "asr_model": self.asr.last_model,
+                    # How English the take sounded, and the language it was
+                    # read in (english_above).
+                    "asr_p_en": getattr(self.asr, "last_p_en", None),
+                    "asr_lang": getattr(self.asr, "take_language", None),
                     # The hint read back on the last window of a long take
                     # instead of speech, and what was done about it.
                     "asr_echo": getattr(self.asr, "last_echo", None),

@@ -368,6 +368,9 @@ UNCOVERED_MIN_S = 6.0
 # timestamps already (see timestamps_after_s) or, with that at 0, is a take the
 # timestamp mode must not touch (it looped on a five-minute one on 22.09).
 REREAD_MAX_S = 25.0
+# Seconds of a take its language is judged on (english_above). The recognizer
+# judges one 30-second window; the margin is for the silence the VAD takes out.
+LANGUAGE_SAMPLE_S = 45
 # The re-read replaces the text only if it is clearly fuller (clearly_fuller).
 # Read with timestamps, all 1,607 takes: 839 came out identical, 7 clearly
 # fuller by the thresholds below. One of the 7 was the real loss; the other six
@@ -579,6 +582,16 @@ class Asr:
         self.reread_early_end = bool(a.get("reread_early_end", False))
         # The penalty on repeated words for a normal reading (see LOOP_PENALTY).
         self.repetition_penalty = float(a.get("repetition_penalty", 1.0))
+        # A take said in English is read as English (30.10.2026). With the
+        # language held at "ru" the recognizer mostly writes English speech in
+        # English anyway, but now and then it translates it, a whole English
+        # sentence pasted as its Russian translation (made-up example: "move the
+        # old notes to the archive" as "Перенеси старые заметки в архив"). So the
+        # take is asked its language first, and above this share of "en" it is
+        # read with "en". 0 = never. Measured in config.toml.
+        self.english_above = float(a.get("english_above", 0.0))
+        self.take_language = self.language  # what the current take is read in
+        self.last_p_en: float | None = None   # how English the last take sounded
         self.last_reread: dict | None = None   # what the last take's second look did
         self.last_echo: dict | None = None     # what the last take's hint check did
         self.last_tail_cut: str | None = None  # a made-up end cut off the last take
@@ -704,7 +717,7 @@ class Asr:
         hint = prompt or None
         segments, _info = model.transcribe(
             audio,
-            language=self.language,
+            language=self.take_language,
             beam_size=self.beam_size,
             # A list of temperatures gives the model a way out: if the
             # result looks like nonsense (over-compressed or improbable text)
@@ -769,6 +782,7 @@ class Asr:
         model, name = self.pick(audio, speech_s)
         self.last_model = name
         self.last_tail_cut = None
+        self.take_language = self._language_of(audio, model)
         long = 0 < self.timestamps_after_s < len(audio) / 16000.0
         # Only a long take has a window after the first, so only there does the
         # way the hint is passed matter. Nothing extra is passed otherwise.
@@ -799,6 +813,26 @@ class Asr:
                 and len(audio) / 16000.0 <= REREAD_MAX_S):
             text = self._reread_early_end(audio, text, model)
         return strip_dialogue_dash(text), time.perf_counter() - t0
+
+    def _language_of(self, audio: np.ndarray, model) -> str:
+        """The language this take is read in: "en" when it sounds English enough."""
+        self.last_p_en = None
+        if self.english_above <= 0 or self.language == "en":
+            return self.language
+        try:
+            # Only the first window is listened to; the rest of a five-minute
+            # take would only cost time in the VAD and the sound features.
+            _lang, _p, probs = model.detect_language(audio[: LANGUAGE_SAMPLE_S * 16000],
+                                                     vad_filter=self.vad)
+        except Exception as exc:
+            # A dead card is the caller's to handle (transcribe_resilient);
+            # anything else — silence the VAD left empty, an odd model — just
+            # leaves the take in the usual language.
+            if self.looks_like_lost_gpu(exc):
+                raise
+            return self.language
+        self.last_p_en = round(float(dict(probs).get("en", 0.0)), 3)
+        return "en" if self.last_p_en > self.english_above else self.language
 
     def _without_echo(self, audio: np.ndarray, text: str, model) -> str:
         """The text of a long take whose end reads like the hint, checked.
@@ -901,6 +935,10 @@ class Asr:
         if self.model is None or not text.strip():
             return None
         if len(audio) / 16000.0 > self.MAX_SCORE_SECONDS:
+            return None
+        # Weighed and measured in Russian only; an English take keeps the mark
+        # the recognizer gave it.
+        if self.take_language != self.language:
             return None
         try:
             from faster_whisper.audio import pad_or_trim
