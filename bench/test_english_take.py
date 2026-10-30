@@ -21,8 +21,8 @@ SR = 16000
 
 
 class FakeModel:
-    def __init__(self, p_en=0.0, fail=None):
-        self.p_en, self.fail = p_en, fail
+    def __init__(self, p_en=0.0, fail=None, text="Some made-up words here."):
+        self.p_en, self.fail, self.text = p_en, fail, text
         self.langs, self.detects = [], 0
 
     def detect_language(self, audio, vad_filter=False):
@@ -34,12 +34,13 @@ class FakeModel:
 
     def transcribe(self, audio, **kw):
         self.langs.append(kw["language"])
-        return [SimpleNamespace(text="Some made-up words here.")], None
+        return [SimpleNamespace(text=self.text)], None
 
 
-def make(p_en=0.0, above=0.5, fail=None, language="ru"):
+def make(p_en=0.0, above=0.5, fail=None, language="ru", window=0.0):
     asr = Asr({"asr": {"model": "large-v3", "short_model": "", "english_above": above,
-                       "language": language, "reread_early_end": False}}, ["Alpha Tool"])
+                       "english_window_s": window, "language": language,
+                       "reread_early_end": False}}, ["Alpha Tool"])
     asr.model = FakeModel(p_en, fail)
     return asr
 
@@ -118,6 +119,43 @@ def _():
     asr = make(p_en=0.0, language="en")
     langs = read(asr)
     return langs == ["en"] and asr.model.detects == 0, f"{langs}"
+
+
+@case("with a window: not asked before any English take")
+def _():
+    asr = make(p_en=0.99, window=300)
+    asr.model.text = "Сделай отчёт по складу."
+    langs = read(asr)
+    return langs == ["ru"] and asr.model.detects == 0, f"{langs}"
+
+
+@case("with a window: asked right after a take that came out in English")
+def _():
+    asr = make(p_en=0.99, window=300)
+    asr.model.text = "Send the draft to the team."
+    read(asr)                      # came out English on its own: opens the window
+    langs = read(asr)
+    return langs == ["ru", "en"] and asr.model.detects == 1, f"{langs}"
+
+
+@case("with a window: not asked once the window has passed")
+def _():
+    asr = make(p_en=0.99, window=300)
+    asr.model.text = "Send the draft to the team."
+    read(asr)
+    asr._english_at -= 301
+    asr.model.text = "Сделай отчёт по складу."
+    read(asr)
+    return asr.model.detects == 0, f"{asr.model.detects}"
+
+
+@case("with a window: a Russian take with a few English terms does not open it")
+def _():
+    asr = make(p_en=0.99, window=300)
+    asr.model.text = "Открой Lavish и проверь PostHog."
+    read(asr)
+    read(asr)
+    return asr.model.detects == 0, f"{asr.model.detects}"
 
 
 if __name__ == "__main__":

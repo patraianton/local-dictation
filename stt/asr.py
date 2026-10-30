@@ -371,6 +371,8 @@ REREAD_MAX_S = 25.0
 # Seconds of a take its language is judged on (english_above). The recognizer
 # judges one 30-second window; the margin is for the silence the VAD takes out.
 LANGUAGE_SAMPLE_S = 45
+# A take whose letters are this Latin came out in English (english_window_s).
+ENGLISH_TEXT_SHARE = 0.9
 # The re-read replaces the text only if it is clearly fuller (clearly_fuller).
 # Read with timestamps, all 1,607 takes: 839 came out identical, 7 clearly
 # fuller by the thresholds below. One of the 7 was the real loss; the other six
@@ -590,6 +592,11 @@ class Asr:
         # take is asked its language first, and above this share of "en" it is
         # read with "en". 0 = never. Measured in config.toml.
         self.english_above = float(a.get("english_above", 0.0))
+        # Asked only this long after a take that came out in English: the check
+        # costs a pass of the model over the sound, and the translations happen
+        # when the speaker has switched to English. 0 = ask on every take.
+        self.english_window_s = float(a.get("english_window_s", 0.0))
+        self._english_at: float | None = None  # when the last English take ended
         self.take_language = self.language  # what the current take is read in
         self.last_p_en: float | None = None   # how English the last take sounded
         self.last_lang_s = 0.0                # what asking that cost, inside ms_asr
@@ -813,6 +820,8 @@ class Asr:
         if (self.reread_early_end and not long and model is self.model
                 and len(audio) / 16000.0 <= REREAD_MAX_S):
             text = self._reread_early_end(audio, text, model)
+        if _latin_share(text) > ENGLISH_TEXT_SHARE:
+            self._english_at = time.monotonic()
         return strip_dialogue_dash(text), time.perf_counter() - t0
 
     def _language_of(self, audio: np.ndarray, model) -> str:
@@ -820,6 +829,10 @@ class Asr:
         self.last_p_en = None
         self.last_lang_s = 0.0
         if self.english_above <= 0 or self.language == "en":
+            return self.language
+        if self.english_window_s > 0 and (
+                self._english_at is None
+                or time.monotonic() - self._english_at > self.english_window_s):
             return self.language
         t0 = time.perf_counter()
         try:

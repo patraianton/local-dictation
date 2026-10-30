@@ -212,6 +212,11 @@ language = "ru"
 # came back as the English said, 8 differ in a word or a mark, one term was
 # lost ("your Claude" -> "your cloud"). 0 = off.
 english_above = 0.7
+# ...asked only within this many seconds of a take that came out in English. The
+# check is a pass of the model over the sound: 67 ms on a 3.6 s take, 113 ms on a
+# 35 s one (30.10.2026), on every take. The 5 translations above came 5 to 36 s
+# after an English take; within 300 s fall 5% of all takes. 0 = every take.
+english_window_s = 300
 # A wider beam. On turbo it costs a hundredth of a second and makes fewer
 # errors: 17.0% against 17.8% on 377 real takes. Set 1 if you want it faster.
 beam_size = 5
