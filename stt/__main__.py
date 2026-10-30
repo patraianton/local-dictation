@@ -1726,6 +1726,7 @@ class Dictation:
                     # read in (english_above).
                     "asr_p_en": getattr(self.asr, "last_p_en", None),
                     "asr_lang": getattr(self.asr, "take_language", None),
+                    "ms_lang": int(getattr(self.asr, "last_lang_s", 0.0) * 1000),
                     # The hint read back on the last window of a long take
                     # instead of speech, and what was done about it.
                     "asr_echo": getattr(self.asr, "last_echo", None),

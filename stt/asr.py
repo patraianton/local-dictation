@@ -592,6 +592,7 @@ class Asr:
         self.english_above = float(a.get("english_above", 0.0))
         self.take_language = self.language  # what the current take is read in
         self.last_p_en: float | None = None   # how English the last take sounded
+        self.last_lang_s = 0.0                # what asking that cost, inside ms_asr
         self.last_reread: dict | None = None   # what the last take's second look did
         self.last_echo: dict | None = None     # what the last take's hint check did
         self.last_tail_cut: str | None = None  # a made-up end cut off the last take
@@ -817,8 +818,10 @@ class Asr:
     def _language_of(self, audio: np.ndarray, model) -> str:
         """The language this take is read in: "en" when it sounds English enough."""
         self.last_p_en = None
+        self.last_lang_s = 0.0
         if self.english_above <= 0 or self.language == "en":
             return self.language
+        t0 = time.perf_counter()
         try:
             # Only the first window is listened to; the rest of a five-minute
             # take would only cost time in the VAD and the sound features.
@@ -831,6 +834,8 @@ class Asr:
             if self.looks_like_lost_gpu(exc):
                 raise
             return self.language
+        finally:
+            self.last_lang_s = time.perf_counter() - t0
         self.last_p_en = round(float(dict(probs).get("en", 0.0)), 3)
         return "en" if self.last_p_en > self.english_above else self.language
 
