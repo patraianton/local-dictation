@@ -291,6 +291,7 @@ class Dictation:
         self.recorder.should_hold = self._may_hold_mic
 
         self.asr = None
+        self.cloud = None      # long takes to the cloud recognizer (cloud.py), set in load
         self._init_flow()
         self.last: dict = {}
         self.mouse_hook = None
@@ -365,6 +366,14 @@ class Dictation:
         self.asr = Asr(self.cfg, self.hint_terms)
         took = self.asr.load()
         log(f"recognizer {self.asr.model_name} on {self.asr.device}: {took:.1f} s")
+        from .cloud import Cloud
+
+        self.cloud = Cloud(self.cfg)
+        self.cloud.set_terms(self.hint_terms)
+        if self.cloud.enabled:
+            log(f"takes of {self.cloud.min_seconds:.0f} s and more go to the cloud "
+                f"({self.cloud.model}, {len(self.cloud.terms)} terms)" if self.cloud.key
+                else "cloud recognizer on, but no key found — every take is read here")
         try:
             from .context import Context, common_by
             self.context = Context(self.terms, int(self.cfg["asr"].get("context_terms", 15)),
@@ -483,6 +492,8 @@ class Dictation:
                 self.hint_terms, int(a.get("prompt_terms", 45)),
                 a.get("prompt_style", "list"),
             )
+        if getattr(self, "cloud", None) is not None:
+            self.cloud.set_terms(self.hint_terms)
         self.polisher.terms = self.terms
         self.polisher.allowed = allowed_words(self.terms, self.fixes)
         self.polisher.protected = self.mywords
@@ -1312,7 +1323,14 @@ class Dictation:
 
     def transcribe_take(self, audio: np.ndarray,
                         speech_s: float | None = None) -> tuple[str, float]:
-        """A take read with its own hint (take_prompt), the usual one put back after."""
+        """A take read with its own hint (take_prompt), the usual one put back after.
+
+        A long one goes to the cloud first (cloud.py); if that fails, it is read here.
+        """
+        self.last_cloud = None
+        text = self.transcribe_in_cloud(audio, speech_s)
+        if text is not None:
+            return text, self.cloud.last_s
         prompt = self.take_prompt()
         if not prompt:
             return self.transcribe_resilient(audio, speech_s)
@@ -1324,6 +1342,40 @@ class Dictation:
             # Unless the terms were reloaded meanwhile: then theirs stays.
             if prompt and self.asr.prompt == prompt:
                 self.asr.prompt = usual
+
+    def transcribe_in_cloud(self, audio: np.ndarray, speech_s: float | None) -> str | None:
+        """The cloud's text for a long take, or None to read it here.
+
+        Not for a take another program recorded too: a call carries other
+        people's voices, and those are not sent anywhere.
+        """
+        cloud = getattr(self, "cloud", None)
+        if cloud is None or not cloud.enabled:
+            return None
+        secs = len(audio) / 16000.0 if speech_s is None else speech_s
+        if not cloud.wanted(secs):
+            return None
+        call = self._call_during(secs)
+        if call:
+            self.last_cloud = {"skipped": f"call: {call}"}
+            return None
+        try:
+            text = self.cloud.transcribe(audio, secs)
+        except Exception:
+            self.last_cloud = {"error": self.cloud.last_error, "s": round(self.cloud.last_s, 2)}
+            log(f"  the cloud did not read this take ({self.cloud.last_error}) — "
+                f"read here after {self.cloud.last_s:.1f} s")
+            return None
+        from .asr import ENGLISH_TEXT_SHARE, _latin_share
+
+        a = self.asr
+        a.last_model = f"cloud {self.cloud.model}"
+        a.last_tail_cut = a.last_echo = a.last_reread = None
+        a.take_language, a.last_p_en, a.last_lang_s = a.language, None, 0.0
+        if _latin_share(text) > ENGLISH_TEXT_SHARE:
+            a._english_at = time.monotonic()
+        self.last_cloud = {"s": round(self.cloud.last_s, 2)}
+        return text
 
     def transcribe_resilient(self, audio: np.ndarray,
                              speech_s: float | None = None) -> tuple[str, float]:
@@ -1727,6 +1779,9 @@ class Dictation:
                     "asr_p_en": getattr(self.asr, "last_p_en", None),
                     "asr_lang": getattr(self.asr, "take_language", None),
                     "ms_lang": int(getattr(self.asr, "last_lang_s", 0.0) * 1000),
+                    # A long take sent to the cloud: its time, or why it was
+                    # read here after all (transcribe_in_cloud).
+                    "cloud": getattr(self, "last_cloud", None),
                     # The hint read back on the last window of a long take
                     # instead of speech, and what was done about it.
                     "asr_echo": getattr(self.asr, "last_echo", None),

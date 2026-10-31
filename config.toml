@@ -249,6 +249,23 @@ prompt_style = "commands"
 context_hint = false
 context_terms = 15
 
+[cloud]
+# Long takes are read by ElevenLabs Scribe (stt/cloud.py). Measured 30.10.2026 on
+# 200 takes from 27-30.10, read both ways with the same terms and dictionary and
+# judged blind by six judges: from 20 s on, 19 errors there against 35 here, and
+# the answer in 2.1 s against 2.5 s; 5-20 s, 22 against 30 but 0.4 s slower;
+# under 5 s, no better and 0.8 s against 0.3 s. A take another program recorded
+# too (a call) is never sent. Without a key, or when it fails, the take is read
+# here. The key: ELEVENLABS_API_KEY in the environment, or in key_file.
+enabled = true
+min_seconds = 20
+model = "scribe_v2"
+key_file = "~/.secrets/speech-cloud.env"
+# How long to wait for the answer: timeout_s + timeout_per_s per second of
+# speech. The slowest of the 50 long takes answered in 3.8 s (69 s of speech).
+timeout_s = 4.0
+timeout_per_s = 0.1
+
 [polish]
 # Tidying the text with a second model through LM Studio (OpenAI-compatible API).
 # The big Qwen3.8-27B on :8099 is a night-only thing for the article conveyor and is
