@@ -30,8 +30,9 @@ TERMS_MAX = 100
 # "а-а-а", "э-э-э", "м-м", "эм", "мм", "uh", "um" — a sound, not a word.
 FILLER_RE = re.compile(
     r"(?<!\w)(?:[аэмуеои](?:-[аэмуеои])+|э+м+|м{2,}|uh|um|hmm|mm)(?!\w)[,.]?\s*", re.I)
-# A letter drawn out three times or more at the end of a word: "емууу" -> "ему".
-STRETCH_RE = re.compile(r"(\w)\1{2,}\b")
+# A letter drawn out three times or more at the end of a word: "емууу" -> "ему",
+# "Иии" -> "И" (the first one a capital: hence any case).
+STRETCH_RE = re.compile(r"(\w)\1{2,}\b", re.I)
 # A word broken off with a double dash: "простой--" -> "простой".
 BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
 # Stammering, written down as it was said (01.11.2026, the first day live): the
