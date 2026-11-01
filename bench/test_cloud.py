@@ -96,6 +96,21 @@ def _():
     return got == want, f"{got}"
 
 
+@case("stammering is taken out; Russian doubled words and hyphenated words stay")
+def _():
+    got = [clean("Надо его по-по-по-покрасить"),
+           clean("Мы, мы, мы, мы пошли в лес"),
+           clean("Положи на, на полку"),
+           clean("Там, как-как-как ты это сделал"),
+           clean("Сначала, типа, -."),
+           clean("Чуть-чуть, по-немецки и во-вторых из-за дождя"),
+           clean("Тише, тише, сказал он")]
+    want = ["Надо его покрасить.", "Мы пошли в лес.", "Положи на полку.",
+            "Там, как ты это сделал.", "Сначала, типа.",
+            "Чуть-чуть, по-немецки и во-вторых из-за дождя.", "Тише, тише, сказал он."]
+    return got == want, f"{got}"
+
+
 @case("a long take goes out with the key, the model and the terms; too long a term is left out")
 def _():
     state.update(reply=(200, {"text": "Ну, а-а-а, собери отчёт по складу"}), delay=0.0)

@@ -34,6 +34,19 @@ FILLER_RE = re.compile(
 STRETCH_RE = re.compile(r"(\w)\1{2,}\b")
 # A word broken off with a double dash: "простой--" -> "простой".
 BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
+# Stammering, written down as it was said (01.11.2026, the first day live): the
+# start of a word said three times and more, "по-по-по-покрасить"; a word said
+# three times and more with hyphens, "как-как-как" (twice is Russian: "чуть-чуть");
+# a word again after a comma, three times and more, or twice for a word of one or
+# two letters, "Мы, мы, мы пошли", "в, в лес"; a dash standing alone, "типа, -.".
+STAMMER_START_RE = re.compile(r"\b(\w{1,4})(?:-\1)+-(?=\1\w)", re.I)
+STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
+REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b(\w{1,2})(?:,\s+\2\b)+", re.I)
+LONE_DASH_RE = re.compile(r"\s+[-—]+(?=\s|[,.!?…]|$)")
+
+
+def _first(m: re.Match) -> str:
+    return m.group(1) or m.group(2)
 
 
 def clean(text: str) -> str:
@@ -41,6 +54,10 @@ def clean(text: str) -> str:
     t = FILLER_RE.sub("", text)
     t = STRETCH_RE.sub(r"\1", t)
     t = BROKEN_RE.sub(r"\1", t)
+    t = STAMMER_START_RE.sub("", t)
+    t = STAMMER_WORD_RE.sub(r"\1", t)
+    t = REPEAT_RE.sub(_first, t)
+    t = LONE_DASH_RE.sub("", t)
     t = re.sub(r"\s+([,.!?…])", r"\1", re.sub(r"\s{2,}", " ", t))
     t = re.sub(r",(?=\s*[,.!?…])", "", t).strip(" ,")
     if t and t[0].islower():
