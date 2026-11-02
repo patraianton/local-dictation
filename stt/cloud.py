@@ -43,6 +43,8 @@ BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
 # 02.11: the stammered syllable need not be the word's own start, only its first
 # letter ("ку-ку-кофе"), and two words can come twice ("как в, как в лес").
 STAMMER_START_RE = re.compile(r"\b((\w)\w{0,3})(?:-\1)+-(?=\2\w)", re.I)
+# A single first letter said ahead of the word: "с-сразу", "о-очень".
+STAMMER_LETTER_RE = re.compile(r"\b(\w)-(?=\1\w{2,})", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b(\w{1,2})(?:,\s+\2\b)+", re.I)
 REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
@@ -59,6 +61,7 @@ def clean(text: str) -> str:
     t = STRETCH_RE.sub(r"\1", t)
     t = BROKEN_RE.sub(r"\1", t)
     t = STAMMER_START_RE.sub("", t)
+    t = STAMMER_LETTER_RE.sub("", t)
     t = STAMMER_WORD_RE.sub(r"\1", t)
     t = REPEAT_RE.sub(_first, t)
     t = REPEAT_PAIR_RE.sub(r"\1", t)
@@ -67,6 +70,8 @@ def clean(text: str) -> str:
     t = re.sub(r",(?=\s*[,.!?…])", "", t).strip(" ,")
     if t and t[0].islower():
         t = t[0].upper() + t[1:]
+    # A sentence whose capital went with a stammer or a filler ("О-очень", "А-а, так").
+    t = re.sub(r"([.!?…]\s+)([a-zа-яё])", lambda m: m.group(1) + m.group(2).upper(), t)
     if t and t[-1] not in ".!?…":
         t += "."
     return t
