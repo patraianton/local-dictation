@@ -50,6 +50,8 @@ STAMMER_LETTER_RE = re.compile(r"\b(?!по-|так-)(\w{1,3})-(?=\1\w)", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b(\w{1,2})(?:,\s+\2\b)+", re.I)
 REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
+# A short word said twice with no comma between: "про про эти", "на на".
+REPEAT_SHORT_RE = re.compile(r"\b([^\W\d_]{1,3})(?:\s+\1\b)+", re.I)
 LONE_DASH_RE = re.compile(r"\s+[-—]+(?=\s|[,.!?…]|$)")
 
 
@@ -67,6 +69,7 @@ def clean(text: str) -> str:
     t = STAMMER_WORD_RE.sub(r"\1", t)
     t = REPEAT_RE.sub(_first, t)
     t = REPEAT_PAIR_RE.sub(r"\1", t)
+    t = REPEAT_SHORT_RE.sub(r"\1", t)
     t = LONE_DASH_RE.sub("", t)
     t = re.sub(r"\s+([,.!?…])", r"\1", re.sub(r"\s{2,}", " ", t))
     t = re.sub(r",(?=\s*[,.!?…])", "", t).strip(" ,")
