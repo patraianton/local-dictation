@@ -43,8 +43,10 @@ BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
 # 02.11: the stammered syllable need not be the word's own start, only its first
 # letter ("ку-ку-кофе"), and two words can come twice ("как в, как в лес").
 STAMMER_START_RE = re.compile(r"\b((\w)\w{0,3})(?:-\1)+-(?=\2\w)", re.I)
-# A single first letter said ahead of the word: "с-сразу", "о-очень".
-STAMMER_LETTER_RE = re.compile(r"\b(\w)-(?=\1\w{2,})", re.I)
+# A single first letter said ahead of the word: "с-сразу", "о-очень"; or the
+# word's first syllable said once ahead of it, "ка-как" — but never "по-",
+# which is Russian itself ("по-польски", "по-полной").
+STAMMER_LETTER_RE = re.compile(r"\b(?!по-)(\w{1,3})-(?=\1\w)", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b(\w{1,2})(?:,\s+\2\b)+", re.I)
 REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
