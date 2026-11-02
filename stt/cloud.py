@@ -40,9 +40,12 @@ BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
 # three times and more with hyphens, "как-как-как" (twice is Russian: "чуть-чуть");
 # a word again after a comma, three times and more, or twice for a word of one or
 # two letters, "Мы, мы, мы пошли", "в, в лес"; a dash standing alone, "типа, -.".
-STAMMER_START_RE = re.compile(r"\b(\w{1,4})(?:-\1)+-(?=\1\w)", re.I)
+# 02.11: the stammered syllable need not be the word's own start, only its first
+# letter ("ку-ку-кофе"), and two words can come twice ("как в, как в лес").
+STAMMER_START_RE = re.compile(r"\b((\w)\w{0,3})(?:-\1)+-(?=\2\w)", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b(\w{1,2})(?:,\s+\2\b)+", re.I)
+REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
 LONE_DASH_RE = re.compile(r"\s+[-—]+(?=\s|[,.!?…]|$)")
 
 
@@ -58,6 +61,7 @@ def clean(text: str) -> str:
     t = STAMMER_START_RE.sub("", t)
     t = STAMMER_WORD_RE.sub(r"\1", t)
     t = REPEAT_RE.sub(_first, t)
+    t = REPEAT_PAIR_RE.sub(r"\1", t)
     t = LONE_DASH_RE.sub("", t)
     t = re.sub(r"\s+([,.!?…])", r"\1", re.sub(r"\s{2,}", " ", t))
     t = re.sub(r",(?=\s*[,.!?…])", "", t).strip(" ,")
