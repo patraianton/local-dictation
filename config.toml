@@ -70,7 +70,13 @@ path = "raw"
 # let go on every window switch (see yield_to below). Half an hour covers a
 # normal working gap; the mic is still handed over at once to the programs in
 # yield_to.
-hot_ms = 1800000
+#
+# Three hours since 02.11.2026: with half an hour, the first phrase after every
+# longer break started cold, 5 times in the day before, and a two-second
+# question lost its first word and came out as the opposite one ("you" heard
+# as "I"). The cost is the browser: a call in a browser tab within three hours
+# of a take may find the microphone busy until the dictation key is pressed once.
+hot_ms = 10800000
 
 # Programs that get the microphone back the moment their window comes to the
 # front. Everything else waits: while dictation holds the mic on the raw path
