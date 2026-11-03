@@ -27,9 +27,9 @@ URL = "https://api.elevenlabs.io/v1/speech-to-text"
 TERM_MAX_CHARS = 49
 TERMS_MAX = 100
 
-# "а-а-а", "э-э-э", "м-м", "эм", "мм", "uh", "um" — a sound, not a word.
+# "а-а-а", "э-э-э", "э", "м-м", "эм", "мм", "uh", "um" — a sound, not a word.
 FILLER_RE = re.compile(
-    r"(?<!\w)(?:[аэмуеои](?:-[аэмуеои])+|э+м+|м{2,}|uh|um|hmm|mm)(?!\w)[,.]?\s*", re.I)
+    r"(?<!\w)(?:[аэмуеои](?:-[аэмуеои])+|э+м*|м{2,}|uh|um|hmm|mm)(?!\w)[,.]?\s*", re.I)
 # A letter drawn out three times or more at the end of a word: "емууу" -> "ему",
 # "Иии" -> "И" (the first one a capital: hence any case).
 STRETCH_RE = re.compile(r"(\w)\1{2,}\b", re.I)
