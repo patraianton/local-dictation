@@ -70,6 +70,9 @@ def make_cloud(**over):
     return c
 
 
+HERE = "Текст, прочитанный здесь."
+
+
 def stand_in(cloud, call=""):
     asr = SimpleNamespace(language="ru", last_model="large-v3", last_tail_cut="x",
                           last_echo="x", last_reread="x", take_language="en",
@@ -77,6 +80,8 @@ def stand_in(cloud, call=""):
     app = SimpleNamespace(cloud=cloud, asr=asr, last_cloud=None, merger=None,
                           _call_during=lambda secs: call)
     app._mark_cloud = lambda text, model: App._mark_cloud(app, text, model)
+    app.transcribe_resilient = lambda audio, speech_s=None: (HERE, 0.05)
+    app._cloud_and_here = lambda a, s, secs, merging: App._cloud_and_here(app, a, s, secs, merging)
     return app
 
 
@@ -203,23 +208,23 @@ def _():
             and App.transcribe_in_cloud(stand_in(off), secs(1), 60.0) is None), ""
 
 
-@case("a service error: read here, the reason written down")
+@case("a service error: the reading here, the reason written down")
 def _():
     state.update(reply=(500, {"detail": "boom"}), delay=0.0)
     app = stand_in(make_cloud())
     text = cloud_text(app, 25.0)
-    return text is None and "HTTP 500" in app.last_cloud["error"], f"{app.last_cloud}"
+    return text == HERE and "HTTP 500" in app.last_cloud["error"], f"{text} {app.last_cloud}"
 
 
-@case("an empty answer: read here")
+@case("an empty answer: the reading here")
 def _():
     state.update(reply=(200, {"text": "а-а-а"}), delay=0.0)
     app = stand_in(make_cloud())
     text = cloud_text(app, 25.0)
-    return text is None and "empty" in app.last_cloud["error"], f"{app.last_cloud}"
+    return text == HERE and "empty" in app.last_cloud["error"], f"{text} {app.last_cloud}"
 
 
-@case("a slow answer: given up after the timeout, read here")
+@case("a slow answer: dropped a second after the reading here, which is used")
 def _():
     state.update(reply=(200, {"text": "поздно"}), delay=2.0)
     app = stand_in(make_cloud())
@@ -227,18 +232,22 @@ def _():
     text = cloud_text(app, 25.0)
     took = time.perf_counter() - t0
     state["delay"] = 0.0
-    return text is None and took < 1.8, f"{took:.2f} s {app.last_cloud}"
+    return text == HERE and took < 1.5, f"{text} {took:.2f} s {app.last_cloud}"
 
 
 @case("an answer that trickles in: given up at the limit for the whole request")
 def _():
     state.update(reply=(200, {"text": "поздно-поздно-поздно"}), delay=0.0, trickle=0.15)
-    app = stand_in(make_cloud())
+    c = make_cloud()
     t0 = time.perf_counter()
-    text = cloud_text(app, 25.0)
+    try:
+        c.transcribe(secs(1), 25.0)
+        err = ""
+    except Exception as exc:
+        err = type(exc).__name__
     took = time.perf_counter() - t0
     state["trickle"] = 0
-    return text is None and took < 1.6 and "TimeoutError" in app.last_cloud["error"], f"{took:.2f} s {app.last_cloud}"
+    return err == "TimeoutError" and took < 1.6, f"{err} {took:.2f} s"
 
 
 @case("the key is read from the environment first, then from the file")

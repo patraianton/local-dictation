@@ -142,7 +142,7 @@ def _():
 
 def stand_in(cloud_text=None, cloud_error=None, here=LOCAL):
     cloud = SimpleNamespace(enabled=True, model="scribe_v2", timeout_s=1.0, timeout_per_s=0.0,
-                            last_s=0.4, last_error=cloud_error,
+                            grace_s=1.0, last_s=0.4, last_error=cloud_error,
                             wanted=lambda secs: True)
 
     def transcribe(audio, secs):
@@ -159,7 +159,7 @@ def stand_in(cloud_text=None, cloud_error=None, here=LOCAL):
                           _call_during=lambda secs: "")
     app.transcribe_resilient = lambda audio, speech_s=None: (here, 0.3)
     app._mark_cloud = lambda text, model: App._mark_cloud(app, text, model)
-    app._cloud_and_here = lambda audio, speech_s, secs: App._cloud_and_here(app, audio, speech_s, secs)
+    app._cloud_and_here = lambda audio, speech_s, secs, merging: App._cloud_and_here(app, audio, speech_s, secs, merging)
     return app
 
 

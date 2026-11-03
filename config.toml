@@ -273,6 +273,10 @@ key_file = "~/.secrets/speech-cloud.env"
 # speech. The slowest of the 50 long takes answered in 3.8 s (69 s of speech).
 timeout_s = 4.0
 timeout_per_s = 0.1
+# The take is read here at the same time; the cloud is waited for only this many
+# seconds past that reading, and its answer dropped if later (03.11.2026: the
+# service took 13-14 s that evening for takes read here in 1-2.5 s).
+grace_s = 1.0
 
 [merge]
 # Takes from min_seconds on are read here too, while the cloud reads them, and

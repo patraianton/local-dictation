@@ -1374,23 +1374,19 @@ class Dictation:
             self.last_cloud = {"skipped": f"call: {call}"}
             return None
         merger = getattr(self, "merger", None)
-        if merger is not None and merger.ready() and secs >= merger.min_seconds:
-            return self._cloud_and_here(audio, speech_s, secs)
-        try:
-            text = self.cloud.transcribe(audio, secs)
-        except Exception:
-            self.last_cloud = {"error": self.cloud.last_error, "s": round(self.cloud.last_s, 2)}
-            log(f"  the cloud did not read this take ({self.cloud.last_error}) — "
-                f"read here after {self.cloud.last_s:.1f} s")
-            return None
-        self._mark_cloud(text, f"cloud {self.cloud.model}")
-        self.last_cloud = {"s": round(self.cloud.last_s, 2)}
-        return text, self.cloud.last_s
+        merging = merger is not None and merger.ready() and secs >= merger.min_seconds
+        return self._cloud_and_here(audio, speech_s, secs, merging)
 
     def _cloud_and_here(self, audio: np.ndarray, speech_s: float | None,
-                        secs: float) -> tuple[str, float]:
-        """Both readings at once — the cloud's in a thread, this one on the card —
-        then merged. No cloud answer: this reading alone; no merge: the cloud's."""
+                        secs: float, merging: bool) -> tuple[str, float]:
+        """Both readings at once — the cloud's in a thread, this one on the card.
+
+        The cloud's is waited for only cloud.grace_s past this one (merging:
+        up to its own limit): on 03.11.2026 evening the service took 13-14 s
+        for takes this card reads in 1-2.5 s, and the wait was all the
+        speaker's. Late or failed, the cloud's answer is dropped and this
+        reading is used; on time, the cloud's (or the two merged).
+        """
         t0 = time.perf_counter()
         box: dict = {}
 
@@ -1403,12 +1399,20 @@ class Dictation:
         worker = threading.Thread(target=ask_cloud, daemon=True)
         worker.start()
         here, _took = self.transcribe_resilient(audio, speech_s)
-        worker.join(self.cloud.timeout_s + self.cloud.timeout_per_s * secs + 1.0)
+        here_s = time.perf_counter() - t0
+        wait = (self.cloud.timeout_s + self.cloud.timeout_per_s * secs + 1.0 if merging
+                else self.cloud.grace_s)
+        worker.join(wait)
         if "text" not in box:
-            why = box.get("error") or "no answer in time"
-            self.last_cloud = {"error": why, "s": round(self.cloud.last_s, 2)}
-            log(f"  the cloud did not read this take ({why}) — the reading here is used")
+            why = box.get("error") or f"no answer {wait:.1f} s after the reading here"
+            self.last_cloud = {"error": why, "s": round(time.perf_counter() - t0, 2),
+                               "here_s": round(here_s, 2)}
+            log(f"  the cloud did not read this take in time ({why}) — the reading here is used")
             return here, time.perf_counter() - t0
+        if not merging:
+            self._mark_cloud(box["text"], f"cloud {self.cloud.model}")
+            self.last_cloud = {"s": round(self.cloud.last_s, 2), "here_s": round(here_s, 2)}
+            return box["text"], time.perf_counter() - t0
         here_model = self.asr.last_model
         merged = self.merger.merge(box["text"], here)
         self._mark_cloud(merged, f"cloud {self.cloud.model} + {here_model}")
