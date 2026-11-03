@@ -15,6 +15,7 @@ the dictionary and the corrector come after, the same as for a take read here.
 import io
 import os
 import re
+import threading
 import time
 import wave
 from pathlib import Path
@@ -92,6 +93,33 @@ def clean(text: str) -> str:
     return t
 
 
+def _post_within(limit: float, url: str, **kw) -> httpx.Response:
+    """The request, given up after `limit` seconds in all.
+
+    httpx's own timeout counts each step on its own — connecting, sending,
+    every wait for the next piece of the answer — so a slow answer went on for
+    13 s against a 4.6 s limit (03.11.2026). The request runs in a thread here;
+    when the time is up it is left to finish on its own and its answer is not
+    waited for.
+    """
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["r"] = httpx.post(url, timeout=limit, **kw)
+        except Exception as exc:
+            box["e"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(limit)
+    if "r" in box:
+        return box["r"]
+    if "e" in box:
+        raise box["e"]
+    raise TimeoutError(f"no answer within {limit:.1f} s")
+
+
 def read_key(cfg_c: dict) -> str:
     """The key: the environment first, then the file named in the settings."""
     key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
@@ -148,10 +176,9 @@ class Cloud:
             data = {"model_id": self.model, "tag_audio_events": "false"}
             if self.terms:
                 data["keyterms"] = self.terms   # one form field per term
-            r = httpx.post(
-                URL, headers={"xi-api-key": self.key}, data=data,
-                files={"file": ("take.wav", wav_bytes(audio), "audio/wav")},
-                timeout=self.timeout_s + self.timeout_per_s * speech_s)
+            limit = self.timeout_s + self.timeout_per_s * speech_s
+            r = _post_within(limit, URL, headers={"xi-api-key": self.key}, data=data,
+                             files={"file": ("take.wav", wav_bytes(audio), "audio/wav")})
             if r.status_code != 200:
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:160]}")
             text = clean(str(r.json().get("text") or ""))

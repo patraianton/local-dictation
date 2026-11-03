@@ -46,6 +46,14 @@ class Fake(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
+        if state.get("trickle"):
+            # Byte by byte, each well inside any single wait: only a limit on
+            # the whole request stops this.
+            for i in range(len(out)):
+                self.wfile.write(out[i:i + 1])
+                self.wfile.flush()
+                time.sleep(state["trickle"])
+            return
         self.wfile.write(out)
 
 
@@ -220,6 +228,17 @@ def _():
     took = time.perf_counter() - t0
     state["delay"] = 0.0
     return text is None and took < 1.8, f"{took:.2f} s {app.last_cloud}"
+
+
+@case("an answer that trickles in: given up at the limit for the whole request")
+def _():
+    state.update(reply=(200, {"text": "поздно-поздно-поздно"}), delay=0.0, trickle=0.15)
+    app = stand_in(make_cloud())
+    t0 = time.perf_counter()
+    text = cloud_text(app, 25.0)
+    took = time.perf_counter() - t0
+    state["trickle"] = 0
+    return text is None and took < 1.6 and "TimeoutError" in app.last_cloud["error"], f"{took:.2f} s {app.last_cloud}"
 
 
 @case("the key is read from the environment first, then from the file")
