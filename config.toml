@@ -284,7 +284,12 @@ timeout_per_s = 0.1
 # key, no answer within timeout_s, an answer not understood — the cloud's text.
 # The key: BEDROCK_API_KEY in the environment, or in key_file. This key's
 # newer models are refused (403), so only the one that answers is listed.
-enabled = true
+# Off since the same evening: with the instruction to keep A unless B is clearly
+# better, the same takes came out better in 18, worse in 16, 38 errors against
+# 40 — the gain is not steady; and the first live take came out worse and took
+# 6 s. A full rewrite by a stronger model did far better (59 against 1) but is
+# too slow to wait for; worth trying again with access to a stronger model.
+enabled = false
 min_seconds = 20
 region = "eu-central-1"
 models = ["eu.anthropic.claude-sonnet-4-5-20250929-v1:0"]

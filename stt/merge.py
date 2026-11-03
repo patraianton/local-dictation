@@ -34,10 +34,12 @@ SYSTEM = (
     "You repair speech recognition. Two recognizers wrote down the same recording "
     "of a Russian speaker who dictates to coding agents and mixes in English tech "
     "terms and product names. You get reading A with the places where reading B "
-    "differs marked as [k: A-text | B-text] (∅ means nothing there). For each place "
-    "choose the variant that is more likely what was really said: real words, "
-    "grammar a native speaker uses, the meaning of the sentence, correct spelling "
-    "of the speaker's terms. Reply with JSON only, like {\"1\":\"A\",\"2\":\"B\"}."
+    "differs marked as [k: A-text | B-text] (∅ means nothing there). Reading A is "
+    "the more accurate one overall, so keep A unless B is clearly better in that "
+    "place: B is a real word where A is not, B makes the sentence grammatical where "
+    "A does not, or B spells one of the speaker's terms right. Two spellings of the "
+    "same word, or a word B adds that A leaves out without loss: keep A. Reply with "
+    "JSON only, like {\"1\":\"A\",\"2\":\"B\"}."
 )
 
 
