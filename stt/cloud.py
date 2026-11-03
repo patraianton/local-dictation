@@ -56,6 +56,9 @@ REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
 # A short word said twice with no comma between: "про про эти", "на на".
 REPEAT_SHORT_RE = re.compile(r"\b([^\W\d_]{1,3})(?:\s+\1\b)+", re.I)
 LONE_DASH_RE = re.compile(r"\s+[-—]+(?=\s|[,.!?…]|$)")
+# A phrase broken off on a half word and said again whole: "можешь пис можешь
+# писать" -> "можешь писать" (the half word is the start of the later one).
+RESTART_RE = re.compile(r"\b((?:\w+\s+){1,5})(\w{1,6})\s+\1(?=\2\w)", re.I)
 
 
 def _first(m: re.Match) -> str:
@@ -73,6 +76,7 @@ def clean(text: str) -> str:
     t = REPEAT_RE.sub(_first, t)
     t = REPEAT_PAIR_RE.sub(r"\1", t)
     t = REPEAT_SHORT_RE.sub(r"\1", t)
+    t = RESTART_RE.sub(r"\1", t)
     t = LONE_DASH_RE.sub("", t)
     t = re.sub(r"\s+([,.!?…])", r"\1", re.sub(r"\s{2,}", " ", t))
     t = re.sub(r",(?=\s*[,.!?…])", "", t).strip(" ,")
