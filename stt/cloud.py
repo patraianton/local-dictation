@@ -46,7 +46,9 @@ STAMMER_START_RE = re.compile(r"\b((\w)\w{0,3})(?:-\1)+-(?=\2\w)", re.I)
 # A single first letter said ahead of the word: "с-сразу", "о-очень"; or the
 # word's first syllable said once ahead of it, "ка-как" — but never "по-",
 # which is Russian itself ("по-польски", "по-полной"), nor "так-таки".
-STAMMER_LETTER_RE = re.compile(r"\b(?!по-|так-)(\w{1,3})-(?=\1\w)", re.I)
+# 03.11: "по-пофикси" is a stammer too; the Russian ones go on with "пол", "пор",
+# "под", "пох" ("по-польски", "по-португальски", "по-подлому", "по-походному").
+STAMMER_LETTER_RE = re.compile(r"\b(?!по-по[лрдх]|так-)(\w{1,3})-(?=\1\w)", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 # 03.11: a word of three letters too ("как, как будто"), but no number ("10, 10").
 REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b([^\W\d_]{1,3})(?:,\s+\2\b)+", re.I)
