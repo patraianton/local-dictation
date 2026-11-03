@@ -66,12 +66,20 @@ def stand_in(cloud, call=""):
     asr = SimpleNamespace(language="ru", last_model="large-v3", last_tail_cut="x",
                           last_echo="x", last_reread="x", take_language="en",
                           last_p_en=0.9, last_lang_s=0.1, _english_at=None)
-    return SimpleNamespace(cloud=cloud, asr=asr, last_cloud=None,
-                           _call_during=lambda secs: call)
+    app = SimpleNamespace(cloud=cloud, asr=asr, last_cloud=None, merger=None,
+                          _call_during=lambda secs: call)
+    app._mark_cloud = lambda text, model: App._mark_cloud(app, text, model)
+    return app
 
 
 def secs(n):
     return np.zeros(int(SR * n), dtype=np.float32)
+
+
+def cloud_text(app, seconds):
+    """The text the cloud path gives, or None when the take is read here."""
+    read = App.transcribe_in_cloud(app, secs(1), seconds)
+    return None if read is None else read[0]
 
 
 CASES = []
@@ -126,7 +134,7 @@ def _():
 def _():
     state.update(reply=(200, {"text": "Ну, а-а-а, собери отчёт по складу"}), delay=0.0)
     app = stand_in(make_cloud())
-    text = App.transcribe_in_cloud(app, secs(1), 25.0)
+    text = cloud_text(app, 25.0)
     s = state["seen"]
     ok = (text == "Ну, собери отчёт по складу." and s["key"] == "test-key"
           and s["model"] == "scribe_v2" and s["terms"] == ["Alpha Tool", "beta-runner"]
@@ -164,7 +172,7 @@ def _():
 def _():
     state["seen"] = {}
     app = stand_in(make_cloud(), call="zoom")
-    text = App.transcribe_in_cloud(app, secs(1), 60.0)
+    text = cloud_text(app, 60.0)
     return text is None and state["seen"] == {} and app.last_cloud == {"skipped": "call: zoom"}, ""
 
 
@@ -181,7 +189,7 @@ def _():
 def _():
     state.update(reply=(500, {"detail": "boom"}), delay=0.0)
     app = stand_in(make_cloud())
-    text = App.transcribe_in_cloud(app, secs(1), 25.0)
+    text = cloud_text(app, 25.0)
     return text is None and "HTTP 500" in app.last_cloud["error"], f"{app.last_cloud}"
 
 
@@ -189,7 +197,7 @@ def _():
 def _():
     state.update(reply=(200, {"text": "а-а-а"}), delay=0.0)
     app = stand_in(make_cloud())
-    text = App.transcribe_in_cloud(app, secs(1), 25.0)
+    text = cloud_text(app, 25.0)
     return text is None and "empty" in app.last_cloud["error"], f"{app.last_cloud}"
 
 
@@ -198,7 +206,7 @@ def _():
     state.update(reply=(200, {"text": "поздно"}), delay=2.0)
     app = stand_in(make_cloud())
     t0 = time.perf_counter()
-    text = App.transcribe_in_cloud(app, secs(1), 25.0)
+    text = cloud_text(app, 25.0)
     took = time.perf_counter() - t0
     state["delay"] = 0.0
     return text is None and took < 1.8, f"{took:.2f} s {app.last_cloud}"

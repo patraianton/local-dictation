@@ -292,6 +292,7 @@ class Dictation:
 
         self.asr = None
         self.cloud = None      # long takes to the cloud recognizer (cloud.py), set in load
+        self.merger = None     # the two readings of a long take merged (merge.py), set in load
         self._init_flow()
         self.last: dict = {}
         self.mouse_hook = None
@@ -374,6 +375,14 @@ class Dictation:
             log(f"takes of {self.cloud.min_seconds:.0f} s and more go to the cloud "
                 f"({self.cloud.model}, {len(self.cloud.terms)} terms)" if self.cloud.key
                 else "cloud recognizer on, but no key found — every take is read here")
+        from .merge import Merger
+
+        self.merger = Merger(self.cfg)
+        self.merger.set_terms(self.hint_terms)
+        if self.merger.enabled:
+            log(f"takes of {self.merger.min_seconds:.0f} s and more are read both ways and "
+                f"merged ({', '.join(self.merger.models)})" if self.merger.key
+                else "merging on, but no key found — the cloud's reading is used alone")
         try:
             from .context import Context, common_by
             self.context = Context(self.terms, int(self.cfg["asr"].get("context_terms", 15)),
@@ -494,6 +503,8 @@ class Dictation:
             )
         if getattr(self, "cloud", None) is not None:
             self.cloud.set_terms(self.hint_terms)
+        if getattr(self, "merger", None) is not None:
+            self.merger.set_terms(self.hint_terms)
         self.polisher.terms = self.terms
         self.polisher.allowed = allowed_words(self.terms, self.fixes)
         self.polisher.protected = self.mywords
@@ -1328,9 +1339,9 @@ class Dictation:
         A long one goes to the cloud first (cloud.py); if that fails, it is read here.
         """
         self.last_cloud = None
-        text = self.transcribe_in_cloud(audio, speech_s)
-        if text is not None:
-            return text, self.cloud.last_s
+        read = self.transcribe_in_cloud(audio, speech_s)
+        if read is not None:
+            return read
         prompt = self.take_prompt()
         if not prompt:
             return self.transcribe_resilient(audio, speech_s)
@@ -1343,11 +1354,14 @@ class Dictation:
             if prompt and self.asr.prompt == prompt:
                 self.asr.prompt = usual
 
-    def transcribe_in_cloud(self, audio: np.ndarray, speech_s: float | None) -> str | None:
-        """The cloud's text for a long take, or None to read it here.
+    def transcribe_in_cloud(self, audio: np.ndarray,
+                            speech_s: float | None) -> tuple[str, float] | None:
+        """The cloud's text for a long take and the time it took, or None to read it here.
 
         Not for a take another program recorded too: a call carries other
-        people's voices, and those are not sent anywhere.
+        people's voices, and those are not sent anywhere. From [merge]
+        min_seconds on, the take is also read here meanwhile, and the two
+        readings are merged (merge.py).
         """
         cloud = getattr(self, "cloud", None)
         if cloud is None or not cloud.enabled:
@@ -1359,6 +1373,9 @@ class Dictation:
         if call:
             self.last_cloud = {"skipped": f"call: {call}"}
             return None
+        merger = getattr(self, "merger", None)
+        if merger is not None and merger.ready() and secs >= merger.min_seconds:
+            return self._cloud_and_here(audio, speech_s, secs)
         try:
             text = self.cloud.transcribe(audio, secs)
         except Exception:
@@ -1366,16 +1383,51 @@ class Dictation:
             log(f"  the cloud did not read this take ({self.cloud.last_error}) — "
                 f"read here after {self.cloud.last_s:.1f} s")
             return None
+        self._mark_cloud(text, f"cloud {self.cloud.model}")
+        self.last_cloud = {"s": round(self.cloud.last_s, 2)}
+        return text, self.cloud.last_s
+
+    def _cloud_and_here(self, audio: np.ndarray, speech_s: float | None,
+                        secs: float) -> tuple[str, float]:
+        """Both readings at once — the cloud's in a thread, this one on the card —
+        then merged. No cloud answer: this reading alone; no merge: the cloud's."""
+        t0 = time.perf_counter()
+        box: dict = {}
+
+        def ask_cloud() -> None:
+            try:
+                box["text"] = self.cloud.transcribe(audio, secs)
+            except Exception:
+                box["error"] = self.cloud.last_error
+
+        worker = threading.Thread(target=ask_cloud, daemon=True)
+        worker.start()
+        here, _took = self.transcribe_resilient(audio, speech_s)
+        worker.join(self.cloud.timeout_s + self.cloud.timeout_per_s * secs + 1.0)
+        if "text" not in box:
+            why = box.get("error") or "no answer in time"
+            self.last_cloud = {"error": why, "s": round(self.cloud.last_s, 2)}
+            log(f"  the cloud did not read this take ({why}) — the reading here is used")
+            return here, time.perf_counter() - t0
+        here_model = self.asr.last_model
+        merged = self.merger.merge(box["text"], here)
+        self._mark_cloud(merged, f"cloud {self.cloud.model} + {here_model}")
+        self.last_cloud = {"s": round(self.cloud.last_s, 2), "merge": self.merger.last}
+        if self.merger.last and self.merger.last.get("error"):
+            log(f"  the two readings were not merged ({self.merger.last['error']}) — "
+                f"the cloud's is used")
+        return merged, time.perf_counter() - t0
+
+    def _mark_cloud(self, text: str, model: str) -> None:
+        """What the journal says about a take the cloud read."""
         from .asr import ENGLISH_TEXT_SHARE, _latin_share
 
         a = self.asr
-        a.last_model = f"cloud {self.cloud.model}"
+        a.last_model = model
         a.last_tail_cut = a.last_echo = a.last_reread = None
         a.take_language, a.last_p_en, a.last_lang_s = a.language, None, 0.0
         if _latin_share(text) > ENGLISH_TEXT_SHARE:
             a._english_at = time.monotonic()
-        self.last_cloud = {"s": round(self.cloud.last_s, 2)}
-        return text
 
     def transcribe_resilient(self, audio: np.ndarray,
                              speech_s: float | None = None) -> tuple[str, float]:

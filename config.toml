@@ -274,6 +274,23 @@ key_file = "~/.secrets/speech-cloud.env"
 timeout_s = 4.0
 timeout_per_s = 0.1
 
+[merge]
+# Takes from min_seconds on are read here too, while the cloud reads them, and
+# where the two readings differ a model on Amazon Bedrock picks one of the two
+# in each place (stt/merge.py). Measured 03.11.2026 on the 93 takes of 27-30.10
+# where that changed the cloud's text, judged blind: better in 33, worse in 16,
+# 39 errors against 58; it adds 1.9 s in the middle and up to 8 s at worst.
+# Only from 20 s on, by the author's choice: there the wait is long anyway. No
+# key, no answer within timeout_s, an answer not understood — the cloud's text.
+# The key: BEDROCK_API_KEY in the environment, or in key_file. This key's
+# newer models are refused (403), so only the one that answers is listed.
+enabled = true
+min_seconds = 20
+region = "eu-central-1"
+models = ["eu.anthropic.claude-sonnet-4-5-20250929-v1:0"]
+key_file = "~/.secrets/speech-cloud.env"
+timeout_s = 4.0
+
 [polish]
 # Tidying the text with a second model through LM Studio (OpenAI-compatible API).
 # The big Qwen3.8-27B on :8099 is a night-only thing for the article conveyor and is
