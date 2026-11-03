@@ -48,7 +48,8 @@ STAMMER_START_RE = re.compile(r"\b((\w)\w{0,3})(?:-\1)+-(?=\2\w)", re.I)
 # which is Russian itself ("по-польски", "по-полной"), nor "так-таки".
 STAMMER_LETTER_RE = re.compile(r"\b(?!по-|так-)(\w{1,3})-(?=\1\w)", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
-REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b(\w{1,2})(?:,\s+\2\b)+", re.I)
+# 03.11: a word of three letters too ("как, как будто"), but no number ("10, 10").
+REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b([^\W\d_]{1,3})(?:,\s+\2\b)+", re.I)
 REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
 # A short word said twice with no comma between: "про про эти", "на на".
 REPEAT_SHORT_RE = re.compile(r"\b([^\W\d_]{1,3})(?:\s+\1\b)+", re.I)
