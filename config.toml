@@ -263,8 +263,10 @@ context_terms = 15
 # under 5 s, no better and 0.8 s against 0.3 s. A take another program recorded
 # too (a call) is never sent. Without a key, or when it fails, the take is read
 # here. The key: ELEVENLABS_API_KEY in the environment, or in key_file.
+# From 20 s until 03.11.2026; since then from 5 s, by the author's choice: the
+# 5-20 s takes gain fewer errors for 0.4 s more of waiting.
 enabled = true
-min_seconds = 20
+min_seconds = 5
 model = "scribe_v2"
 key_file = "~/.secrets/speech-cloud.env"
 # How long to wait for the answer: timeout_s + timeout_per_s per second of
