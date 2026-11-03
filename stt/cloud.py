@@ -160,6 +160,9 @@ class Cloud:
         # The take is read here meanwhile; the cloud is waited for this long past
         # that reading, and dropped if later (__main__._cloud_and_here).
         self.grace_s = float(c.get("grace_s", 1.0))
+        # ...but a long take may take the cloud its usual time: up to grace_s +
+        # grace_per_s per second of speech from the start, whichever is later.
+        self.grace_per_s = float(c.get("grace_per_s", 0.0))
         self.key = read_key(c) if self.enabled else ""
         self.terms: list[str] = []
         self.last_error: str | None = None

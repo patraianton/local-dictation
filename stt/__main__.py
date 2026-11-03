@@ -1400,8 +1400,9 @@ class Dictation:
         worker.start()
         here, _took = self.transcribe_resilient(audio, speech_s)
         here_s = time.perf_counter() - t0
+        usual = self.cloud.grace_s + getattr(self.cloud, "grace_per_s", 0.0) * secs - here_s
         wait = (self.cloud.timeout_s + self.cloud.timeout_per_s * secs + 1.0 if merging
-                else self.cloud.grace_s)
+                else max(self.cloud.grace_s, usual))
         worker.join(wait)
         if "text" not in box:
             why = box.get("error") or f"no answer {wait:.1f} s after the reading here"

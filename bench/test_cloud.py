@@ -235,6 +235,18 @@ def _():
     return text == HERE and took < 1.5, f"{text} {took:.2f} s {app.last_cloud}"
 
 
+@case("a long take waits the cloud's usual time past the reading here")
+def _():
+    state.update(reply=(200, {"text": "Длинный ответ облака"}), delay=1.6)
+    c = make_cloud(timeout_s=5.0, grace_s=0.3, grace_per_s=0.03)
+    app = stand_in(c)
+    text = cloud_text(app, 60.0)        # 0.3 + 0.03 * 60 = 2.1 s from the start
+    short = stand_in(make_cloud(timeout_s=5.0, grace_s=0.3, grace_per_s=0.03, min_seconds=5))
+    t_short = cloud_text(short, 6.0)    # 0.3 + 0.18 = 0.48 s: too soon, the reading here
+    state["delay"] = 0.0
+    return text == "Длинный ответ облака." and t_short == HERE, f"{text!r} {t_short!r}"
+
+
 @case("an answer that trickles in: given up at the limit for the whole request")
 def _():
     state.update(reply=(200, {"text": "поздно-поздно-поздно"}), delay=0.0, trickle=0.15)
