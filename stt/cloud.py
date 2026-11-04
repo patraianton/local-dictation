@@ -50,7 +50,8 @@ STAMMER_START_RE = re.compile(r"\b((\w)\w{0,3})(?:-\1)+-(?=\2\w)", re.I)
 # which is Russian itself ("по-польски", "по-полной"), nor "так-таки".
 # 03.11: "по-пофикси" is a stammer too; the Russian ones go on with "пол", "пор",
 # "под", "пох" ("по-польски", "по-португальски", "по-подлому", "по-походному").
-STAMMER_LETTER_RE = re.compile(r"\b(?!по-по[лрдх]|так-)(\w{1,3})-(?=\1\w)", re.I)
+# 04.11: up to four letters ahead ("крас-красивая").
+STAMMER_LETTER_RE = re.compile(r"\b(?!по-по[лрдх]|так-)(\w{1,4})-(?=\1\w)", re.I)
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 # A hyphened start said twice: "по-по-твоему" -> "по-твоему".
 STAMMER_DUP_RE = re.compile(r"\b(\w{1,3})-(?=\1-\w)", re.I)
