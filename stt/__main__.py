@@ -8,6 +8,7 @@ Usage:
     run.ps1 selftest     — check everything is in place
     run.ps1 bench FILE   — how long recognition takes
 """
+import collections
 import io
 import json
 import sys
@@ -1389,12 +1390,23 @@ class Dictation:
         """
         t0 = time.perf_counter()
         box: dict = {}
+        # Late on 3 of the last 4 takes: not waited for at all this time (04.11.2026:
+        # late on 6 takes in an hour, a second of waiting for nothing each). It is
+        # still asked, and its answers, late or not, decide the next takes.
+        recent = getattr(self.cloud, "recent", None)
+        if recent is None:
+            recent = self.cloud.recent = collections.deque(maxlen=4)
+        skip = len(recent) >= 3 and sum(recent) >= 3
 
         def ask_cloud() -> None:
             try:
                 box["text"] = self.cloud.transcribe(audio, secs)
             except Exception:
                 box["error"] = self.cloud.last_error
+            finally:
+                deadline = box.get("deadline")
+                recent.append("error" in box or (deadline is not None
+                                                 and time.perf_counter() > deadline))
 
         worker = threading.Thread(target=ask_cloud, daemon=True)
         worker.start()
@@ -1403,9 +1415,11 @@ class Dictation:
         usual = self.cloud.grace_s + getattr(self.cloud, "grace_per_s", 0.0) * secs - here_s
         wait = (self.cloud.timeout_s + self.cloud.timeout_per_s * secs + 1.0 if merging
                 else max(self.cloud.grace_s, usual))
-        worker.join(wait)
+        box["deadline"] = time.perf_counter() + wait
+        worker.join(0.0 if skip and not merging else wait)
         if "text" not in box:
-            why = box.get("error") or f"no answer {wait:.1f} s after the reading here"
+            why = (box.get("error") or ("not waited for: late on 3 of the last 4 takes" if skip
+                                        else f"no answer {wait:.1f} s after the reading here"))
             self.last_cloud = {"error": why, "s": round(time.perf_counter() - t0, 2),
                                "here_s": round(here_s, 2)}
             log(f"  the cloud did not read this take in time ({why}) — the reading here is used")

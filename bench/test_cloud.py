@@ -253,6 +253,27 @@ def _():
     return text == "Длинный ответ облака." and t_short == HERE, f"{text!r} {t_short!r}"
 
 
+@case("late on 3 of the last 4 takes: not waited for; on time again: waited for again")
+def _():
+    c = make_cloud(timeout_s=3.0, grace_s=0.3, min_seconds=5)
+    app = stand_in(c)
+    state.update(reply=(200, {"text": "Облако"}), delay=0.8)
+    late = [cloud_text(app, 6.0) for _ in range(3)]      # each dropped after 0.3 s
+    time.sleep(0.8)                                        # the late answers still arrive
+    state["delay"] = 0.1
+    t0 = time.perf_counter()
+    skipped = cloud_text(app, 6.0)                         # would be on time, but not waited for
+    took = time.perf_counter() - t0
+    time.sleep(0.3)
+    back = []
+    for _ in range(3):                                     # on time again: the recent ones turn
+        back.append(cloud_text(app, 6.0))
+        time.sleep(0.2)                                    # takes come seconds apart
+    state["delay"] = 0.0
+    return (late == [HERE] * 3 and skipped == HERE and took < 0.08
+            and back[-1] == "Облако."), f"{late} {skipped} {took:.2f} {back} {list(c.recent)}"
+
+
 @case("an answer that trickles in: given up at the limit for the whole request")
 def _():
     state.update(reply=(200, {"text": "поздно-поздно-поздно"}), delay=0.0, trickle=0.15)
