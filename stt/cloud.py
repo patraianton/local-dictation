@@ -55,6 +55,10 @@ STAMMER_LETTER_RE = re.compile(r"\b(?!по-по[лрдх]|так-)(\w{1,4})-(?=\
 STAMMER_WORD_RE = re.compile(r"\b(\w+)(?:-\1\b){2,}", re.I)
 # A hyphened start said twice: "по-по-твоему" -> "по-твоему".
 STAMMER_DUP_RE = re.compile(r"\b(\w{1,3})-(?=\1-\w)", re.I)
+# 04.11: a preposition said twice with a hyphen, "за-за дом" -> "за дом" (no
+# Russian word is a doubled preposition; "ну-ну", "да-да", "чуть-чуть" stay).
+STAMMER_PREP_RE = re.compile(
+    r"\b(за|на|по|от|до|из|об|со|ко|во|про|при|под|над|без|для)-\1\b(?!-)", re.I)
 # 03.11: a word of three letters too ("как, как будто"), but no number ("10, 10").
 REPEAT_RE = re.compile(r"\b(\w+)(?:,\s+\1\b){2,}|\b([^\W\d_]{1,3})(?:,\s+\2\b)+", re.I)
 REPEAT_PAIR_RE = re.compile(r"\b(\w+\s+\w+)(?:,\s+\1\b)+", re.I)
@@ -79,6 +83,7 @@ def clean(text: str) -> str:
     t = STAMMER_LETTER_RE.sub("", t)
     t = STAMMER_WORD_RE.sub(r"\1", t)
     t = STAMMER_DUP_RE.sub("", t)
+    t = STAMMER_PREP_RE.sub(r"\1", t)
     t = REPEAT_RE.sub(_first, t)
     t = REPEAT_PAIR_RE.sub(r"\1", t)
     t = REPEAT_SHORT_RE.sub(r"\1", t)
