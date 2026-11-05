@@ -47,6 +47,10 @@ SILENCE_RMS = 0.0015
 # must have been missed, so the press is treated as a new one (see on_down).
 KEY_REPEAT_GAP_S = 1.5
 
+# The cloud's lateness on the last takes is forgotten after this long without
+# one (see Dictation._cloud_and_here).
+CLOUD_LATE_FORGET_S = 1800.0
+
 # Paste-again (see Dictation.on_repaste) waits this long before it pastes, and
 # does not paste if the dictation key went down meanwhile: a thumb that brushes
 # the button on its way to the key. Short enough not to be felt on purpose.
@@ -1396,6 +1400,11 @@ class Dictation:
         recent = getattr(self.cloud, "recent", None)
         if recent is None:
             recent = self.cloud.recent = collections.deque(maxlen=4)
+        # How late it was half an hour ago and more says nothing about now
+        # (05.11.2026: late at midnight, so the first take in the morning was
+        # not waited for).
+        if time.perf_counter() - getattr(self.cloud, "recent_at", t0) > CLOUD_LATE_FORGET_S:
+            recent.clear()
         skip = len(recent) >= 3 and sum(recent) >= 3
 
         def ask_cloud() -> None:
@@ -1407,6 +1416,7 @@ class Dictation:
                 deadline = box.get("deadline")
                 recent.append("error" in box or (deadline is not None
                                                  and time.perf_counter() > deadline))
+                self.cloud.recent_at = time.perf_counter()
 
         worker = threading.Thread(target=ask_cloud, daemon=True)
         worker.start()

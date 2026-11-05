@@ -276,6 +276,20 @@ def _():
             and back[-1] == "Облако."), f"{late} {skipped} {took:.2f} {back} {list(c.recent)}"
 
 
+@case("late at night, then nothing for hours: the first take in the morning waits for the cloud")
+def _():
+    c = make_cloud(timeout_s=3.0, grace_s=0.3, min_seconds=5)
+    app = stand_in(c)
+    state.update(reply=(200, {"text": "Облако"}), delay=0.8)
+    late = [cloud_text(app, 6.0) for _ in range(3)]
+    time.sleep(0.8)
+    state["delay"] = 0.1
+    c.recent_at -= 3600                                    # an hour without a take
+    morning = cloud_text(app, 6.0)
+    state["delay"] = 0.0
+    return late == [HERE] * 3 and morning == "Облако.", f"{late} {morning!r} {list(c.recent)}"
+
+
 @case("an answer that trickles in: given up at the limit for the whole request")
 def _():
     state.update(reply=(200, {"text": "поздно-поздно-поздно"}), delay=0.0, trickle=0.15)
