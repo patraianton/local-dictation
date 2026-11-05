@@ -271,12 +271,16 @@ model = "scribe_v2"
 key_file = "~/.secrets/speech-cloud.env"
 # How long to wait for the answer: timeout_s + timeout_per_s per second of
 # speech. The slowest of the 50 long takes answered in 3.8 s (69 s of speech).
-timeout_s = 4.0
+timeout_s = 6.0
 timeout_per_s = 0.1
-# The take is read here at the same time; the cloud is waited for only this many
-# seconds past that reading, and its answer dropped if later (03.11.2026: the
-# service took 13-14 s that evening for takes read here in 1-2.5 s).
-grace_s = 1.0
+# The take is read here at the same time; the cloud is waited for this many
+# seconds past that reading, and its answer dropped if later. Until 06.11.2026
+# 1.0 s (03.11.2026: the service took 13-14 s one evening): on 04-05.11 that
+# dropped 36 cloud answers, mostly late in the evening, and the reading here
+# that went in instead was the worse one. The author: what counts is that the
+# text is right, not how long it takes. So the cloud is waited for up to its own
+# limit above; it is dropped only when it fails or does not answer at all.
+grace_s = 30.0
 # A long take is given the cloud's usual time, though: it reads about 0.06-0.07 s
 # per second of speech (27 long takes, 31.10-03.11), so it may take up to
 # grace_s + grace_per_s per second from the start, if that is later. A 100 s
