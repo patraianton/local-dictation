@@ -35,6 +35,9 @@ FILLER_RE = re.compile(
 # A letter drawn out three times or more at the end of a word: "емууу" -> "ему",
 # "Иии" -> "И" (the first one a capital: hence any case).
 STRETCH_RE = re.compile(r"(\w)\1{2,}\b", re.I)
+# ...and in the middle of a word, "наааспекать", "Тааак" (05.11.2026). Only
+# between two Russian letters: "ООО" (a company) and "1000" stay.
+MIDSTRETCH_RE = re.compile(r"(?<=[а-яё])([а-яё])\1{2,}(?=[а-яё])", re.I)
 # A word broken off with a double dash: "простой--" -> "простой".
 BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
 # Stammering, written down as it was said (01.11.2026, the first day live): the
@@ -79,6 +82,7 @@ def clean(text: str) -> str:
     """The cloud's verbatim text, the way a take read here comes out."""
     t = FILLER_RE.sub("", text)
     t = STRETCH_RE.sub(r"\1", t)
+    t = MIDSTRETCH_RE.sub(r"\1", t)
     t = BROKEN_RE.sub(r"\1", t)
     t = STAMMER_START_RE.sub("", t)
     t = STAMMER_LETTER_RE.sub("", t)
