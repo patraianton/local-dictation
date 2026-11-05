@@ -33,8 +33,14 @@ TERMS_MAX = 100
 FILLER_RE = re.compile(
     r"(?<!\w)(?:[аэмуеои](?:-[аэмуеои])+|э+м*|м{2,}|мх|хм+|[бгджзлнпртфхцчшщ](?!-)|uh|um|hmm|mm)(?!\w)[,.]?\s*", re.I)
 # A letter drawn out three times or more at the end of a word: "емууу" -> "ему",
-# "Иии" -> "И" (the first one a capital: hence any case).
-STRETCH_RE = re.compile(r"(\w)\1{2,}\b", re.I)
+# "Иии" -> "И" (the first one a capital: hence any case). A letter, not a digit,
+# and not a word in capitals: until 05.11.2026 "1000" came out as "10" and "ООО"
+# (a company) as "О".
+STRETCH_RE = re.compile(r"\b(\w*?)([^\W\d_])\2{2,}\b", re.I)
+
+
+def _unstretch(m: re.Match) -> str:
+    return m.group(0) if m.group(0).isupper() else m.group(1) + m.group(2)
 # ...and in the middle of a word, "наааспекать", "Тааак" (05.11.2026). Only
 # between two Russian letters: "ООО" (a company) and "1000" stay.
 MIDSTRETCH_RE = re.compile(r"(?<=[а-яё])([а-яё])\1{2,}(?=[а-яё])", re.I)
@@ -81,7 +87,7 @@ def _first(m: re.Match) -> str:
 def clean(text: str) -> str:
     """The cloud's verbatim text, the way a take read here comes out."""
     t = FILLER_RE.sub("", text)
-    t = STRETCH_RE.sub(r"\1", t)
+    t = STRETCH_RE.sub(_unstretch, t)
     t = MIDSTRETCH_RE.sub(r"\1", t)
     t = BROKEN_RE.sub(r"\1", t)
     t = STAMMER_START_RE.sub("", t)
