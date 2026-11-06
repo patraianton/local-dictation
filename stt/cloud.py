@@ -44,6 +44,10 @@ def _unstretch(m: re.Match) -> str:
 # ...and in the middle of a word, "наааспекать", "Тааак" (05.11.2026). Only
 # between two Russian letters: "ООО" (a company) and "1000" stay.
 MIDSTRETCH_RE = re.compile(r"(?<=[а-яё])([а-яё])\1{2,}(?=[а-яё])", re.I)
+# A drawn-out "а-а" or "э-э" glued to the end of a word that ends in another
+# vowel: "нравитсяаа" -> "нравится" (06.11.2026). After a consonant it is left
+# alone: "мамаа" could be "мама" said long, and that is not ours to guess.
+TAIL_FILLER_RE = re.compile(r"(?<=[еёиоуыюя])а{2,}\b|(?<=[аеёиоуыюя])э{2,}\b", re.I)
 # A word broken off with a double dash: "простой--" -> "простой".
 BROKEN_RE = re.compile(r"(\w)--(?=\s|$)")
 # Stammering, written down as it was said (01.11.2026, the first day live): the
@@ -89,6 +93,7 @@ def clean(text: str) -> str:
     t = FILLER_RE.sub("", text)
     t = STRETCH_RE.sub(_unstretch, t)
     t = MIDSTRETCH_RE.sub(r"\1", t)
+    t = TAIL_FILLER_RE.sub("", t)
     t = BROKEN_RE.sub(r"\1", t)
     t = STAMMER_START_RE.sub("", t)
     t = STAMMER_LETTER_RE.sub("", t)
